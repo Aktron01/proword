@@ -30,7 +30,10 @@ local CONFIG = {
     
     MistakeChance = 0.08,        
     MicroPauseChance = 0.15,
-    SubmitDelay = 0.05,        
+    SubmitDelay = 0.05, 
+    
+    -- [NEW] SAFETY SETTINGS
+    VerificationDelay = 1.0, -- How long to wait to see if word worked (1.0s is safe for lag)
 }
 
 -- // DICTIONARY SYSTEM \\ --
@@ -51,7 +54,7 @@ local usedWords = {}
 
 -- [Safe Mega Dictionary Loader]
 task.spawn(function()
-    local url = "https://raw.githubusercontent.com/Aktron01/jsonwords/refs/heads/main/mainword.json"
+    local url = "https://ezken.xyz/raw.githubusercontent.com/Aktron01/jsonwords/refs/heads/main/mainword.json"
     print(" [Ultimate] Downloading Dictionary...")
     
     local success, response = pcall(function() return game:HttpGet(url) end)
@@ -113,11 +116,12 @@ local function getValidWord(prefix)
         end
     end
     
-    -- Fallback scan (in case optimization missed something)
+    -- Fallback scan
     if #validWords == 0 then
         for _, word in ipairs(words) do
             if #word >= prefixLen and #word <= CONFIG.MaxWordLength then
                 if word:sub(1, prefixLen):lower() == prefixLower then
+                    -- If we are desperate, we try words we technically used but might have failed
                     table.insert(validWords, word:lower())
                 end
             end
@@ -159,7 +163,7 @@ local function getValidWord(prefix)
         selectedWord = validWords[1]
     end
     
-    usedWords[selectedWord] = true
+    -- Note: We do NOT mark used here anymore, we mark it after typing starts
     return selectedWord
 end
 
@@ -177,6 +181,15 @@ local function typeLetter(letter, fastMode)
             task.wait(randomFloat(0.015, 0.035)) 
         end
         VirtualInputManager:SendKeyEvent(false, keyCode, false, game)
+    end
+end
+
+-- [NEW] Function to clear text if a word fails
+local function clearText(length)
+    for i = 1, length + 2 do -- +2 extra backspaces just to be safe
+        VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.Backspace, false, game)
+        task.wait(0.02)
+        VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.Backspace, false, game)
     end
 end
 
@@ -238,37 +251,25 @@ local function getGameFrame()
     return success and frame or nil
 end
 
--- ========================================================
--- [NEW] OPPONENT WORD DETECTION
--- ========================================================
 local function scanForUsedWords()
     local frame = getGameFrame()
     if not frame then return end
     
-    -- We scan all TextLabels inside the Game Frame
-    -- If a text label matches a word in our dictionary, we mark it as used.
     for _, descendant in ipairs(frame:GetDescendants()) do
         if descendant:IsA("TextLabel") and descendant.Visible then
             local text = descendant.Text
-            -- Clean the text (remove spaces/punctuation)
             local cleanWord = text:match("^%s*([%a]+)%s*$")
             
             if cleanWord and #cleanWord >= CONFIG.MinWordLength then
                 cleanWord = cleanWord:lower()
-                
-                -- Check if this text is actually a word in our DB
-                -- (This prevents banning UI text like "Score" or "Timer")
                 local firstLetter = cleanWord:sub(1,1):upper()
                 local dictionaryList = WORD_DATABASE[firstLetter]
                 
                 if dictionaryList then
-                    -- It is a valid word, now check if we already tracked it
                     if not usedWords[cleanWord] then
-                         -- Verify strictly that it exists in the list to avoid false positives
                          for _, w in ipairs(dictionaryList) do
                             if w:lower() == cleanWord then
                                 usedWords[cleanWord] = true
-                                -- print(" [Scanner] Detected used word:", cleanWord)
                                 break
                             end
                          end
@@ -278,7 +279,6 @@ local function scanForUsedWords()
         end
     end
 end
--- ========================================================
 
 local function getRequiredLetterLabel()
     local frame = getGameFrame()
@@ -341,12 +341,9 @@ local function autoPlay()
     if isProcessing then return end
     if not CONFIG.Enabled then return end
     
-    -- [NEW] SCAN FOR WORDS EVERY TICK
     scanForUsedWords()
     
     local myTurn = isOurTurn()
-    
-    -- Detect Turn Start for Timer Reset
     if myTurn and not lastTurnState then
         TurnStartTime = tick()
     end
@@ -356,42 +353,60 @@ local function autoPlay()
     
     isProcessing = true
     
-    -- 1. Get Prefix
-    local prefix = getCurrentPrefix()
-    if prefix == "" then
-        local req = getRequiredLetterLabel()
-        if req then prefix = req end
+    -- // RETRY LOOP //
+    -- We will try up to 3 times to get a word right.
+    for attempt = 1, 3 do
+        if not isOurTurn() then break end -- Turn ended, stop everything
+        
+        -- 1. Get Prefix
+        local prefix = getCurrentPrefix()
+        if prefix == "" then
+            local req = getRequiredLetterLabel()
+            if req then prefix = req end
+        end
+        
+        if prefix == "" then break end -- Can't find prefix, wait for next tick
+        
+        -- 2. Find Word
+        local fullWord = getValidWord(prefix)
+        if not fullWord then
+            -- No words left? Stop trying to avoid errors
+            break 
+        end
+        
+        local suffix = fullWord:sub(#prefix + 1)
+        
+        -- 3. Type
+        if suffix ~= "" then
+            typeWord(suffix)
+        end
+        
+        -- 4. Submit
+        task.wait(CONFIG.SubmitDelay)
+        submitWord()
+        
+        -- 5. VERIFICATION PHASE (Crucial for Safety)
+        -- We wait to see if the game accepts it.
+        local checkTime = CONFIG.VerificationDelay
+        if attempt > 1 then checkTime = 0.5 end -- Faster checks on retries
+        
+        task.wait(checkTime)
+        
+        if not isOurTurn() then
+            -- SUCCESS: It's no longer our turn, the word worked!
+            usedWords[fullWord:lower()] = true
+            break
+        else
+            -- FAILURE: It is STILL our turn. The word was rejected.
+            -- Mark as used so getValidWord() picks a DIFFERENT word next time
+            usedWords[fullWord:lower()] = true
+            
+            -- Clear the text box
+            clearText(#suffix)
+            
+            -- Loop continues to next attempt...
+        end
     end
-    
-    if prefix == "" then
-        isProcessing = false
-        return
-    end
-    
-    -- 2. Find Word
-    local fullWord = getValidWord(prefix)
-    if not fullWord then
-        isProcessing = false
-        return
-    end
-    
-    local suffix = fullWord:sub(#prefix + 1)
-    
-    -- 3. Reaction Delay
-    local timeLeft = CONFIG.RoundDuration - (tick() - TurnStartTime)
-    if timeLeft > CONFIG.SafeModeThreshold then
-        local reactionTime = randomFloat(0.8, 1.5)
-        task.wait(reactionTime)
-    end
-    
-    -- 4. Type
-    if suffix ~= "" then
-        typeWord(suffix)
-    end
-    
-    -- 5. Submit
-    task.wait(CONFIG.SubmitDelay)
-    submitWord()
     
     isProcessing = false
 end
@@ -431,7 +446,7 @@ local function createUltimateUI()
     local title = Instance.new("TextLabel")
     title.Size = UDim2.new(1, 0, 0, 30)
     title.BackgroundTransparency = 1
-    title.Text = "AutoPlay v3 (Scanner Mode)"
+    title.Text = "AutoPlay v4 (Safety Mode)"
     title.TextColor3 = Color3.fromRGB(0, 255, 200)
     title.Font = Enum.Font.GothamBlack
     title.TextSize = 14
