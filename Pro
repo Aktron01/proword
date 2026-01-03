@@ -52,7 +52,7 @@ local usedWords = {}
 
 -- [Safe Mega Dictionary Loader]
 task.spawn(function()
-    local url = "https://raw.githubusercontent.com/dwyl/english-words/refs/heads/master/words_dictionary.json"
+    local url = "https://raw.githubusercontent.com/Aktron01/jsonwords/refs/heads/main/mainword.json"
     print(" [Ultimate] Downloading Dictionary...")
     
     local success, response = pcall(function() return game:HttpGet(url) end)
