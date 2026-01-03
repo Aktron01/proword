@@ -13,7 +13,6 @@ local CONFIG = {
     Enabled = true,
     
     -- STRATEGY SETTINGS
-    -- Modes: "Shortest", "Longest" (Troll), "Target" (Specific Ending), "Random"
     Strategy = "Shortest", 
     TargetEnding = "", 
     
@@ -21,9 +20,9 @@ local CONFIG = {
     MaxWordLength = 35,
     
     -- ROUND SETTINGS
-    RoundDuration = 15, -- Total seconds per round
-    PanicThreshold = 5, -- If time left is less than this, type INSTANTLY
-    SafeModeThreshold = 8, -- If time left is less than this, force SHORTEST word
+    RoundDuration = 15,
+    PanicThreshold = 5,
+    SafeModeThreshold = 8,
     
     -- HUMANIZATION SETTINGS
     HumanMode = true,        
@@ -114,6 +113,7 @@ local function getValidWord(prefix)
         end
     end
     
+    -- Fallback scan (in case optimization missed something)
     if #validWords == 0 then
         for _, word in ipairs(words) do
             if #word >= prefixLen and #word <= CONFIG.MaxWordLength then
@@ -131,19 +131,13 @@ local function getValidWord(prefix)
     local timeLeft = CONFIG.RoundDuration - timeElapsed
     local forceShort = false
     
-    -- If we have less than 8 seconds left, ABANDON TROLL MODE to ensure survival
     if timeLeft < CONFIG.SafeModeThreshold then
         forceShort = true
-        -- print(" [Safety Protocol] Low time! Forcing Shortest Word.")
     end
     
     table.sort(validWords, function(a, b)
-        -- Priority 1: Safety Override
-        if forceShort then
-            return #a < #b
-        end
+        if forceShort then return #a < #b end
         
-        -- Priority 2: User Strategy
         if CONFIG.Strategy == "Target" and CONFIG.TargetEnding ~= "" then
             local target = CONFIG.TargetEnding:lower()
             local aEnds = a:sub(-1) == target
@@ -169,7 +163,7 @@ local function getValidWord(prefix)
     return selectedWord
 end
 
--- // ADAPTIVE HUMAN TYPING ENGINE (WITH PANIC MODE) \\ --
+-- // ADAPTIVE HUMAN TYPING ENGINE \\ --
 
 local function randomFloat(min, max)
     return min + math.random() * (max - min)
@@ -190,7 +184,6 @@ local function typeWord(word)
     local len = #word
     local targetDuration = 0
     
-    -- 1. Calculate Human Target Time
     if len <= 4 then targetDuration = randomFloat(1.5, 2.5)
     elseif len <= 9 then targetDuration = randomFloat(3.0, 5.0)
     else targetDuration = randomFloat(5.0, 10.0) end
@@ -199,25 +192,21 @@ local function typeWord(word)
     local avgDelay = targetDuration / len
     
     for i = 1, len do
-        -- // PANIC CHECK INSIDE LOOP \\ --
         local timeLeft = CONFIG.RoundDuration - (tick() - TurnStartTime)
         local isPanic = timeLeft < CONFIG.PanicThreshold
         
         local letter = string.sub(word, i, i)
         
         if isPanic then
-            -- INSTANT TYPING
             typeLetter(letter, true)
-            task.wait() -- Minimal wait (1 frame)
+            task.wait() 
         else
-            -- HUMAN TYPING
             local currentDelay = avgDelay * randomFloat(0.7, 1.3)
             
             if CONFIG.Strategy ~= "Longest" and math.random() < CONFIG.MicroPauseChance and i > 1 then
                 currentDelay = currentDelay + randomFloat(0.15, 0.3)
             end
             
-            -- Mistakes (Only if safe)
             if math.random() < CONFIG.MistakeChance then
                  local wrongKey = string.char(string.byte(letter) + 1)
                  typeLetter(wrongKey, false)
@@ -248,6 +237,48 @@ local function getGameFrame()
     end)
     return success and frame or nil
 end
+
+-- ========================================================
+-- [NEW] OPPONENT WORD DETECTION
+-- ========================================================
+local function scanForUsedWords()
+    local frame = getGameFrame()
+    if not frame then return end
+    
+    -- We scan all TextLabels inside the Game Frame
+    -- If a text label matches a word in our dictionary, we mark it as used.
+    for _, descendant in ipairs(frame:GetDescendants()) do
+        if descendant:IsA("TextLabel") and descendant.Visible then
+            local text = descendant.Text
+            -- Clean the text (remove spaces/punctuation)
+            local cleanWord = text:match("^%s*([%a]+)%s*$")
+            
+            if cleanWord and #cleanWord >= CONFIG.MinWordLength then
+                cleanWord = cleanWord:lower()
+                
+                -- Check if this text is actually a word in our DB
+                -- (This prevents banning UI text like "Score" or "Timer")
+                local firstLetter = cleanWord:sub(1,1):upper()
+                local dictionaryList = WORD_DATABASE[firstLetter]
+                
+                if dictionaryList then
+                    -- It is a valid word, now check if we already tracked it
+                    if not usedWords[cleanWord] then
+                         -- Verify strictly that it exists in the list to avoid false positives
+                         for _, w in ipairs(dictionaryList) do
+                            if w:lower() == cleanWord then
+                                usedWords[cleanWord] = true
+                                -- print(" [Scanner] Detected used word:", cleanWord)
+                                break
+                            end
+                         end
+                    end
+                end
+            end
+        end
+    end
+end
+-- ========================================================
 
 local function getRequiredLetterLabel()
     local frame = getGameFrame()
@@ -310,12 +341,14 @@ local function autoPlay()
     if isProcessing then return end
     if not CONFIG.Enabled then return end
     
+    -- [NEW] SCAN FOR WORDS EVERY TICK
+    scanForUsedWords()
+    
     local myTurn = isOurTurn()
     
     -- Detect Turn Start for Timer Reset
     if myTurn and not lastTurnState then
         TurnStartTime = tick()
-        -- print(" [Timer] Turn Started at: " .. TurnStartTime)
     end
     lastTurnState = myTurn
     
@@ -335,7 +368,7 @@ local function autoPlay()
         return
     end
     
-    -- 2. Find Word (Logic handles Panic Switching)
+    -- 2. Find Word
     local fullWord = getValidWord(prefix)
     if not fullWord then
         isProcessing = false
@@ -344,14 +377,14 @@ local function autoPlay()
     
     local suffix = fullWord:sub(#prefix + 1)
     
-    -- 3. Reaction Delay (Skip if Panic)
+    -- 3. Reaction Delay
     local timeLeft = CONFIG.RoundDuration - (tick() - TurnStartTime)
     if timeLeft > CONFIG.SafeModeThreshold then
         local reactionTime = randomFloat(0.8, 1.5)
         task.wait(reactionTime)
     end
     
-    -- 4. Type (Logic handles Panic Speed)
+    -- 4. Type
     if suffix ~= "" then
         typeWord(suffix)
     end
@@ -398,7 +431,7 @@ local function createUltimateUI()
     local title = Instance.new("TextLabel")
     title.Size = UDim2.new(1, 0, 0, 30)
     title.BackgroundTransparency = 1
-    title.Text = "AutoPlay v3 (Panic Mode)"
+    title.Text = "AutoPlay v3 (Scanner Mode)"
     title.TextColor3 = Color3.fromRGB(0, 255, 200)
     title.Font = Enum.Font.GothamBlack
     title.TextSize = 14
@@ -525,7 +558,7 @@ local function createUltimateUI()
                          statusLabel.TextColor3 = Color3.fromRGB(0,255,0)
                     end
                 else
-                    statusLabel.Text = "Waiting..."
+                    statusLabel.Text = "Scanning UI for words..."
                     statusLabel.TextColor3 = Color3.fromRGB(150,150,150)
                 end
             end
