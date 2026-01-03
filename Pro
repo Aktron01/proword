@@ -32,20 +32,18 @@ local CONFIG = {
     MicroPauseChance = 0.15,
     SubmitDelay = 0.05, 
     
-    VerificationDelay = 0.8, -- Slightly faster check
+    VerificationDelay = 0.8,
 }
 
 -- // DICTIONARY SYSTEM \\ --
 local STARTER_WORDS = {
-    A = { "apple", "about", "after", "again", "alarm", "allow", "angry", "apart", "apple", "apply", "aware" },
-    B = { "basic", "beach", "begin", "black", "block", "board", "boost", "bound", "brain", "brake", "bread" },
-    C = { "catch", "cause", "chain", "chair", "chart", "chase", "cheap", "check", "child", "class", "clean" },
-    D = { "dance", "death", "depth", "doubt", "draft", "drain", "dream", "dress", "drink", "drive", "drove" },
-    E = { "early", "earth", "eight", "empty", "enemy", "enjoy", "enter", "entry", "equal", "error", "event" },
-    F = { "faith", "false", "fault", "favor", "fence", "field", "fight", "final", "first", "flame", "flash" },
-    S = { "scale", "scene", "scope", "score", "sense", "serve", "seven", "shade", "shake", "share", "sharp" },
-    T = { "table", "taste", "teach", "thank", "theme", "there", "thick", "thing", "think", "third", "those" },
-    W = { "waste", "watch", "water", "where", "which", "while", "white", "whole", "whose", "woman", "world" }
+    A={"apple","about"}, B={"basic","bread"}, C={"catch","clean"}, D={"dance","drive"},
+    E={"early","entry"}, F={"faith","field"}, G={"game","great","group","guard","guess"},
+    H={"happy","heart"}, I={"image","index"}, J={"joint","judge"}, K={"knife","knock"},
+    L={"label","laugh"}, M={"magic","money"}, N={"never","night"}, O={"ocean","order"},
+    P={"paper","phone"}, Q={"queen","quiet"}, R={"radio","range"}, S={"scale","sound"},
+    T={"table","thing"}, U={"uncle","under"}, V={"value","voice"}, W={"water","world"},
+    X={"xenon","xerox"}, Y={"year","young"}, Z={"zebra","zone"}
 }
 
 local WORD_DATABASE = STARTER_WORDS
@@ -53,7 +51,7 @@ local usedWords = {}
 
 -- [Dictionary Loader]
 task.spawn(function()
-    local url = "https://ezken.xyz/raw.githubusercontent.com/Aktron01/jsonwords/refs/heads/main/mainword.json"
+    local url = "https://raw.githubusercontent.com/Aktron01/jsonwords/refs/heads/main/mainword.json"
     local success, response = pcall(function() return game:HttpGet(url) end)
     
     if not success or not response then 
@@ -90,6 +88,7 @@ end)
 local TurnStartTime = 0
 local isProcessing = false 
 local lastProcessTime = 0 
+local currentTurnBase = "" -- [NEW] Stores the game's given root for this turn
 
 -- // LOGIC FUNCTIONS \\ --
 
@@ -114,8 +113,8 @@ local function getValidWord(prefix)
         end
     end
     
+    -- Desperation Search
     if #validWords == 0 then
-        -- Desperation Search: Try words even if we used them, hoping to just survive
         for _, word in ipairs(words) do
             if #word >= prefixLen and #word <= CONFIG.MaxWordLength then
                 if word:sub(1, prefixLen):lower() == prefixLower then
@@ -177,13 +176,14 @@ local function typeLetter(letter, fastMode)
     end
 end
 
--- [IMPROVED] Aggressive Clear
+-- [UPDATED] Smart Clear
 local function clearText(count)
-    -- We use a higher count to ensure we delete EVERYTHING up to the locked root
-    local loopCount = count or 15 
+    local loopCount = count or 1
+    if loopCount < 1 then return end
+    
     for i = 1, loopCount do 
         VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.Backspace, false, game)
-        task.wait() -- Run as fast as possible (1 frame wait)
+        task.wait() 
         VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.Backspace, false, game)
     end
 end
@@ -348,6 +348,15 @@ local function autoPlay()
     local myTurn = isOurTurn()
     if myTurn and not lastTurnState then
         TurnStartTime = tick()
+        -- [SNAPSHOT] Capture the exact letters given by the game at turn start
+        -- Wait a tiny bit for GUI to update
+        task.wait(0.1) 
+        currentTurnBase = getCurrentPrefix()
+        -- If empty, try fallback
+        if currentTurnBase == "" then 
+            local req = getRequiredLetterLabel()
+            if req then currentTurnBase = req end
+        end
     end
     lastTurnState = myTurn
     
@@ -356,32 +365,38 @@ local function autoPlay()
     isProcessing = true
     lastProcessTime = tick() 
     
-    -- // ROBUST RETRY LOOP //
-    for attempt = 1, 4 do -- Increased attempts to 4
+    -- // SAFE RETRY LOOP \\ --
+    for attempt = 1, 4 do 
         if not isOurTurn() then break end 
         
         local prefix = getCurrentPrefix()
-        if prefix == "" then
-            local req = getRequiredLetterLabel()
-            if req then prefix = req end
-        end
+        
+        -- Fallback if prefix is somehow empty but base exists
+        if prefix == "" then prefix = currentTurnBase end
         
         if prefix == "" then 
-            -- Can't see prefix, wait slightly
             task.wait(0.2)
         else
-            -- 2. Find Word
             local fullWord = getValidWord(prefix)
             
-            -- [NEW] RECOVERY LOGIC
-            -- If we can't find a word, it might be because the screen has garbage like "ED"
+            -- [SMART RECOVERY LOGIC]
             if not fullWord then 
-                -- warn("No word found for prefix: " .. prefix .. ". Attempting blind reset.")
-                clearText(15) -- SPAM BACKSPACE
-                task.wait(0.3) -- Give game time to process deletion
-                
-                -- Force loop to restart immediately to check new prefix
-                -- We do not break, we iterate to next attempt
+                -- We only delete if we have typed MORE than the game gave us.
+                -- e.g. Game gave "STR" (len 3). Current is "STRX" (len 4).
+                -- 4 > 3 -> Delete 1 character.
+                if #prefix > #currentTurnBase then
+                     local charsToDelete = #prefix - #currentTurnBase
+                     -- Limit deletion to avoid spam (max 10)
+                     if charsToDelete > 10 then charsToDelete = 10 end
+                     
+                     clearText(charsToDelete)
+                     task.wait(0.3)
+                else
+                     -- We are at the root (or below it). Do NOT delete.
+                     -- Just wait. The dictionary might be missing the word, 
+                     -- or the UI hasn't updated.
+                     task.wait(0.5)
+                end
             else
                 -- We found a word!
                 local suffix = fullWord:sub(#prefix + 1)
@@ -400,15 +415,17 @@ local function autoPlay()
                 task.wait(checkTime)
                 
                 if not isOurTurn() then
-                    -- SUCCESS
                     usedWords[fullWord:lower()] = true
                     break
                 else
-                    -- FAILURE
+                    -- Word Failed.
                     usedWords[fullWord:lower()] = true
-                    -- AGGRESSIVE CLEAR: Delete 15 chars to ensure we kill the bad word
-                    clearText(15)
-                    task.wait(0.2)
+                    
+                    -- Only clear what WE added
+                    if suffix ~= "" then
+                        clearText(#suffix)
+                        task.wait(0.2)
+                    end
                 end
             end
         end
@@ -456,7 +473,7 @@ local function createUltimateUI()
     local title = Instance.new("TextLabel")
     title.Size = UDim2.new(1, 0, 0, 30)
     title.BackgroundTransparency = 1
-    title.Text = "AutoPlay v6 (Aggressive Recovery)"
+    title.Text = "AutoPlay v8 (Smart Base)"
     title.TextColor3 = Color3.fromRGB(0, 255, 200)
     title.Font = Enum.Font.GothamBlack
     title.TextSize = 13
