@@ -22,12 +22,16 @@ local CONFIG = {
     
     -- ROUND SETTINGS
     RoundDuration = 15,
-    PanicThreshold = 5,
+    PanicThreshold = 5,    -- If time < 5s, skip reaction delay
     SafeModeThreshold = 8,
     
     -- HUMANIZATION SETTINGS
     HumanMode = true,        
-    SpeedMultiplier = 1.0, -- Now controlled by Slider
+    SpeedMultiplier = 1.0, 
+    
+    -- [NEW] REACTION DELAY (Seconds)
+    ReactionMin = 1.0,
+    ReactionMax = 1.5,
     
     MistakeChance = 0.08,        
     MicroPauseChance = 0.15,
@@ -195,10 +199,7 @@ local function typeWord(word)
     elseif len <= 9 then targetDuration = randomFloat(3.0, 5.0)
     else targetDuration = randomFloat(5.0, 10.0) end
     
-    -- Speed Multiplier Logic
-    -- Higher Multiplier = Less Duration = Faster
     targetDuration = targetDuration / CONFIG.SpeedMultiplier 
-    
     local avgDelay = targetDuration / len
     
     for i = 1, len do
@@ -217,7 +218,6 @@ local function typeWord(word)
                 currentDelay = currentDelay + randomFloat(0.15, 0.3)
             end
             
-            -- Reduced mistakes on high speeds to prevent frustration
             local adjustedMistakeChance = CONFIG.MistakeChance
             if CONFIG.SpeedMultiplier > 1.5 then adjustedMistakeChance = 0.02 end
             
@@ -392,6 +392,17 @@ local function autoPlay()
                 local suffix = fullWord:sub(#prefix + 1)
                 
                 if suffix ~= "" then
+                    -- [NEW] REALISTIC THINKING DELAY
+                    -- Only waits on the first attempt, and only if we have plenty of time.
+                    local timeLeft = CONFIG.RoundDuration - (tick() - TurnStartTime)
+                    if attempt == 1 and timeLeft > CONFIG.PanicThreshold then
+                        local thinkTime = randomFloat(CONFIG.ReactionMin, CONFIG.ReactionMax)
+                        task.wait(thinkTime)
+                        
+                        -- Re-check turn ownership after thinking
+                        if not isOurTurn() then break end
+                    end
+                    
                     typeWord(suffix)
                 end
                 
@@ -445,7 +456,6 @@ local function createUltimateUI()
     screenGui.ResetOnSpawn = false
     screenGui.Parent = PlayerGui
     
-    -- Increased height to fit Slider
     local frame = Instance.new("Frame")
     frame.Size = UDim2.new(0, 220, 0, 320)
     frame.Position = UDim2.new(0, 20, 0.5, -160)
@@ -460,7 +470,7 @@ local function createUltimateUI()
     local title = Instance.new("TextLabel")
     title.Size = UDim2.new(1, 0, 0, 30)
     title.BackgroundTransparency = 1
-    title.Text = "AutoPlay v9 (Speed Control)"
+    title.Text = "AutoPlay v10 (Human Delay)"
     title.TextColor3 = Color3.fromRGB(0, 255, 200)
     title.Font = Enum.Font.GothamBlack
     title.TextSize = 13
@@ -490,7 +500,7 @@ local function createUltimateUI()
     strategyBtn.Parent = frame
     local sCorner = Instance.new("UICorner"); sCorner.CornerRadius = UDim.new(0,6); sCorner.Parent = strategyBtn
 
-    -- [NEW SLIDER SECTION]
+    -- [SLIDER]
     local sliderLabel = Instance.new("TextLabel")
     sliderLabel.Size = UDim2.new(1, 0, 0, 15)
     sliderLabel.Position = UDim2.new(0, 0, 0, 130)
@@ -509,7 +519,7 @@ local function createUltimateUI()
     local slCorner = Instance.new("UICorner"); slCorner.CornerRadius = UDim.new(1,0); slCorner.Parent = sliderBg
     
     local sliderFill = Instance.new("Frame")
-    sliderFill.Size = UDim2.new(0.2, 0, 1, 0) -- Starts at ~1.0 scale (approx 20% of range)
+    sliderFill.Size = UDim2.new(0.2, 0, 1, 0)
     sliderFill.BackgroundColor3 = Color3.fromRGB(0, 200, 255)
     sliderFill.Parent = sliderBg
     local sfCorner = Instance.new("UICorner"); sfCorner.CornerRadius = UDim.new(1,0); sfCorner.Parent = sliderFill
@@ -520,7 +530,6 @@ local function createUltimateUI()
     sliderBtn.Text = ""
     sliderBtn.Parent = sliderBg
     
-    -- Slider Logic
     local dragging = false
     local minSpeed = 0.5
     local maxSpeed = 5.0
@@ -540,12 +549,11 @@ local function createUltimateUI()
             sliderFill.Size = UDim2.new(relativePos, 0, 1, 0)
             
             local newSpeed = minSpeed + (relativePos * (maxSpeed - minSpeed))
-            newSpeed = math.floor(newSpeed * 10) / 10 -- Round to 1 decimal
+            newSpeed = math.floor(newSpeed * 10) / 10 
             
             CONFIG.SpeedMultiplier = newSpeed
             sliderLabel.Text = "Typing Speed: " .. newSpeed .. "x"
             
-            -- Color shift for visual feedback
             if newSpeed > 3 then
                 sliderFill.BackgroundColor3 = Color3.fromRGB(255, 50, 50)
                 sliderLabel.TextColor3 = Color3.fromRGB(255, 100, 100)
@@ -556,7 +564,7 @@ local function createUltimateUI()
         end
     end)
 
-    -- [Target Box] (Moved Down)
+    -- [Target Box] 
     local targetLabel = Instance.new("TextLabel")
     targetLabel.Size = UDim2.new(1, 0, 0, 15)
     targetLabel.Position = UDim2.new(0, 0, 0, 170)
@@ -579,7 +587,7 @@ local function createUltimateUI()
     targetBox.Parent = frame
     local tbCorner = Instance.new("UICorner"); tbCorner.CornerRadius = UDim.new(0,6); tbCorner.Parent = targetBox
 
-    -- [Reset Memory] (Moved Down)
+    -- [Reset Memory] 
     local resetBtn = Instance.new("TextButton")
     resetBtn.Size = UDim2.new(0.9, 0, 0, 30)
     resetBtn.Position = UDim2.new(0.05, 0, 0, 230)
@@ -591,7 +599,7 @@ local function createUltimateUI()
     resetBtn.Parent = frame
     local rCorner = Instance.new("UICorner"); rCorner.CornerRadius = UDim.new(0,6); rCorner.Parent = resetBtn
 
-    -- [Status Info] (Moved Down)
+    -- [Status Info] 
     local statusLabel = Instance.new("TextLabel")
     statusLabel.Size = UDim2.new(1, 0, 0, 20)
     statusLabel.Position = UDim2.new(0, 0, 0, 275)
