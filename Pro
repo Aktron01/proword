@@ -23,11 +23,11 @@ local CONFIG = {
     -- HUMANIZATION SETTINGS
     HumanMode = true,        
     
-    -- Typing Speed (Lower = Faster)
+    -- Global Speed Multiplier (1.0 = Normal, 0.5 = Fast, 1.5 = Slow)
     SpeedMultiplier = 1.0, 
     
-    MistakeChance = 0.05,        
-    MicroPauseChance = 0.1,
+    MistakeChance = 0.08,        
+    MicroPauseChance = 0.15,
     SubmitDelay = 0.05,        
 }
 
@@ -62,7 +62,7 @@ task.spawn(function()
     local newDB = {}
     local count = 0
     
-    -- Safe Parser (No JSONDecode)
+    -- Safe Parser
     for word in response:gmatch('"([%a]+)":') do
         if #word >= CONFIG.MinWordLength then
             local first = word:sub(1,1):upper()
@@ -72,7 +72,7 @@ task.spawn(function()
         end
     end
     
-    -- Merge starter words to be safe
+    -- Merge starter words
     for letter, list in pairs(STARTER_WORDS) do
         if not newDB[letter] then newDB[letter] = {} end
         for _, word in ipairs(list) do
@@ -159,39 +159,69 @@ local function getValidWord(prefix)
     return selectedWord
 end
 
--- // HUMANIZED TYPING \\ --
-
-local function typeLetter(letter, holdDuration)
-    local keyCode = Enum.KeyCode[string.upper(letter)]
-    if keyCode then
-        VirtualInputManager:SendKeyEvent(true, keyCode, false, game)
-        task.wait(holdDuration or 0.015)
-        VirtualInputManager:SendKeyEvent(false, keyCode, false, game)
-    end
-end
+-- // ADAPTIVE HUMAN TYPING ENGINE \\ --
 
 local function randomFloat(min, max)
     return min + math.random() * (max - min)
 end
 
+local function typeLetter(letter)
+    local keyCode = Enum.KeyCode[string.upper(letter)]
+    if keyCode then
+        VirtualInputManager:SendKeyEvent(true, keyCode, false, game)
+        task.wait(randomFloat(0.015, 0.035)) -- Realistic key press duration
+        VirtualInputManager:SendKeyEvent(false, keyCode, false, game)
+    end
+end
+
 local function typeWord(word)
-    -- Calculate speed based on Strategy
-    local baseDelay = 0.05 * CONFIG.SpeedMultiplier
+    local len = #word
+    local targetDuration = 0
     
-    if CONFIG.Strategy == "Shortest" then baseDelay = 0.035 end
-    if CONFIG.Strategy == "Longest" then baseDelay = 0.015 end -- Type fast for long words
+    -- // 1. CALCULATE TARGET TIME BASED ON LENGTH \\ --
+    if len <= 4 then
+        -- Short Words (2-4): 1.5s to 2.5s
+        targetDuration = randomFloat(1.5, 2.5)
+    elseif len <= 9 then
+        -- Medium Words (5-9): 3.0s to 5.0s
+        targetDuration = randomFloat(3.0, 5.0)
+    else
+        -- Long Words (10+): 5.0s to 10.0s
+        targetDuration = randomFloat(5.0, 10.0)
+    end
     
-    for i = 1, #word do
+    -- Apply Global Multiplier
+    targetDuration = targetDuration * CONFIG.SpeedMultiplier
+
+    -- Calculate delay per character
+    local avgDelay = targetDuration / len
+    
+    -- // 2. TYPE LOOP WITH VARIANCE \\ --
+    for i = 1, len do
         local letter = string.sub(word, i, i)
-        local currentDelay = baseDelay * randomFloat(0.8, 1.2)
         
-        -- Micro pauses for realism (only in normal modes)
-        if CONFIG.Strategy ~= "Longest" and math.random() < CONFIG.MicroPauseChance and i > 1 then
-            currentDelay = currentDelay + randomFloat(0.1, 0.15)
+        -- Calculate specific delay for this letter
+        -- Human variance: fast streaks vs slow pauses
+        local currentDelay = avgDelay * randomFloat(0.7, 1.3)
+        
+        -- Add Micro Pauses (Thinking pauses)
+        if math.random() < CONFIG.MicroPauseChance and i > 1 then
+            currentDelay = currentDelay + randomFloat(0.15, 0.3)
+        end
+        
+        -- Mistake Simulation
+        if math.random() < CONFIG.MistakeChance then
+             local wrongKey = string.char(string.byte(letter) + 1) -- Just a dummy wrong char
+             typeLetter(wrongKey)
+             task.wait(randomFloat(0.1, 0.2)) -- Realize mistake
+             VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.Backspace, false, game)
+             task.wait(randomFloat(0.05, 0.1))
+             VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.Backspace, false, game)
+             task.wait(randomFloat(0.1, 0.2)) -- Recover
         end
         
         task.wait(currentDelay)
-        typeLetter(letter, randomFloat(0.01, 0.03))
+        typeLetter(letter)
     end
 end
 
@@ -201,10 +231,9 @@ local function submitWord()
     VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.Return, false, game)
 end
 
--- // GAME STATE DETECTION (The Working Fix) \\ --
+-- // GAME STATE DETECTION \\ --
 
 local function getGameFrame()
-    -- This looks for the UI physically on your screen
     local success, frame = pcall(function()
         return PlayerGui.InGame.Frame
     end)
@@ -257,7 +286,6 @@ local function isOurTurn()
     local typeLabel = frame:FindFirstChild("Type")
     if typeLabel and typeLabel:IsA("TextLabel") then
         local text = typeLabel.Text
-        -- Loose matching to ensure it works
         if string.find(text, LocalPlayer.DisplayName) or 
            string.find(text, LocalPlayer.Name) or 
            string.find(text:lower(), "your turn") then
@@ -275,7 +303,6 @@ local function autoPlay()
     if isProcessing then return end
     if not CONFIG.Enabled then return end
     
-    -- Reliance only on UI visibility (Safe)
     if not isOurTurn() then return end
     
     local now = tick()
@@ -296,7 +323,7 @@ local function autoPlay()
         return
     end
     
-    -- 2. Find Word (Using Strategy)
+    -- 2. Find Word
     local fullWord = getValidWord(prefix)
     if not fullWord then
         isProcessing = false
@@ -305,11 +332,11 @@ local function autoPlay()
     
     local suffix = fullWord:sub(#prefix + 1)
     
-    -- 3. Reaction Delay
-    local reactionTime = randomFloat(0.5, 1.0)
+    -- 3. Human Reaction Time (0.8s to 1.5s)
+    local reactionTime = randomFloat(0.8, 1.5)
     task.wait(reactionTime)
     
-    -- 4. Type
+    -- 4. Type with Adaptive Human Engine
     if suffix ~= "" then
         typeWord(suffix)
     end
@@ -327,14 +354,6 @@ local function startMonitoring()
             if CONFIG.Enabled then
                 autoPlay()
             end
-        end
-    end)
-    
-    -- Optional: If the game DOES use attributes, we use them to clear memory.
-    -- If not, this simply won't run, which is fine.
-    LocalPlayer:GetAttributeChangedSignal("InTable"):Connect(function()
-        if LocalPlayer:GetAttribute("InTable") == true then
-            usedWords = {}
         end
     end)
 end
@@ -364,7 +383,7 @@ local function createUltimateUI()
     local title = Instance.new("TextLabel")
     title.Size = UDim2.new(1, 0, 0, 30)
     title.BackgroundTransparency = 1
-    title.Text = "Ultimate AutoPlay"
+    title.Text = "Ultimate AutoPlay v2"
     title.TextColor3 = Color3.fromRGB(0, 255, 200)
     title.Font = Enum.Font.GothamBlack
     title.TextSize = 16
