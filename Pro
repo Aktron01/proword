@@ -13,7 +13,7 @@ local CONFIG = {
     Enabled = true,
     
     -- STRATEGY SETTINGS
-    Strategy = "Shortest", 
+    Strategy = "Random", 
     TargetEnding = "", 
     
     MinWordLength = 2,
