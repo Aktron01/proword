@@ -32,7 +32,7 @@ local CONFIG = {
     MicroPauseChance = 0.15,
     SubmitDelay = 0.05, 
     
-    VerificationDelay = 1.0,
+    VerificationDelay = 0.8, -- Slightly faster check
 }
 
 -- // DICTIONARY SYSTEM \\ --
@@ -51,10 +51,9 @@ local STARTER_WORDS = {
 local WORD_DATABASE = STARTER_WORDS
 local usedWords = {}
 
--- [Safe Mega Dictionary Loader]
+-- [Dictionary Loader]
 task.spawn(function()
     local url = "https://ezken.xyz/raw.githubusercontent.com/Aktron01/jsonwords/refs/heads/main/mainword.json"
-    
     local success, response = pcall(function() return game:HttpGet(url) end)
     
     if not success or not response then 
@@ -89,8 +88,8 @@ end)
 
 -- // GLOBAL STATE \\ --
 local TurnStartTime = 0
-local isProcessing = false -- Made global so Watchdog can see it
-local lastProcessTime = 0  -- [NEW] To track when we last started typing
+local isProcessing = false 
+local lastProcessTime = 0 
 
 -- // LOGIC FUNCTIONS \\ --
 
@@ -115,8 +114,8 @@ local function getValidWord(prefix)
         end
     end
     
-    -- Fallback scan
     if #validWords == 0 then
+        -- Desperation Search: Try words even if we used them, hoping to just survive
         for _, word in ipairs(words) do
             if #word >= prefixLen and #word <= CONFIG.MaxWordLength then
                 if word:sub(1, prefixLen):lower() == prefixLower then
@@ -128,7 +127,6 @@ local function getValidWord(prefix)
     
     if #validWords == 0 then return nil end
     
-    -- // TIME-AWARE STRATEGY SORTING \\ --
     local timeElapsed = tick() - TurnStartTime
     local timeLeft = CONFIG.RoundDuration - timeElapsed
     local forceShort = false
@@ -179,10 +177,13 @@ local function typeLetter(letter, fastMode)
     end
 end
 
-local function clearText(length)
-    for i = 1, length + 2 do 
+-- [IMPROVED] Aggressive Clear
+local function clearText(count)
+    -- We use a higher count to ensure we delete EVERYTHING up to the locked root
+    local loopCount = count or 15 
+    for i = 1, loopCount do 
         VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.Backspace, false, game)
-        task.wait(0.02)
+        task.wait() -- Run as fast as possible (1 frame wait)
         VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.Backspace, false, game)
     end
 end
@@ -249,7 +250,6 @@ local function scanForUsedWords()
     local frame = getGameFrame()
     if not frame then return end
     
-    -- Wrapped in pcall to prevent crash from breaking main loop
     pcall(function()
         for _, descendant in ipairs(frame:GetDescendants()) do
             if descendant:IsA("TextLabel") and descendant.Visible then
@@ -335,8 +335,7 @@ local lastTurnState = false
 
 local function autoPlay()
     if isProcessing then 
-        -- [NEW] Watchdog: If we've been processing for > 4 seconds, verify we aren't stuck
-        if tick() - lastProcessTime > 4 then
+        if tick() - lastProcessTime > 5 then
              isProcessing = false
         end
         return 
@@ -355,10 +354,10 @@ local function autoPlay()
     if not myTurn then return end
     
     isProcessing = true
-    lastProcessTime = tick() -- Stamp time
+    lastProcessTime = tick() 
     
-    -- // RETRY LOOP //
-    for attempt = 1, 3 do
+    -- // ROBUST RETRY LOOP //
+    for attempt = 1, 4 do -- Increased attempts to 4
         if not isOurTurn() then break end 
         
         local prefix = getCurrentPrefix()
@@ -367,31 +366,51 @@ local function autoPlay()
             if req then prefix = req end
         end
         
-        if prefix == "" then break end
-        
-        local fullWord = getValidWord(prefix)
-        if not fullWord then break end
-        
-        local suffix = fullWord:sub(#prefix + 1)
-        
-        if suffix ~= "" then
-            typeWord(suffix)
-        end
-        
-        task.wait(CONFIG.SubmitDelay)
-        submitWord()
-        
-        local checkTime = CONFIG.VerificationDelay
-        if attempt > 1 then checkTime = 0.5 end
-        
-        task.wait(checkTime)
-        
-        if not isOurTurn() then
-            usedWords[fullWord:lower()] = true
-            break
+        if prefix == "" then 
+            -- Can't see prefix, wait slightly
+            task.wait(0.2)
         else
-            usedWords[fullWord:lower()] = true
-            clearText(#suffix)
+            -- 2. Find Word
+            local fullWord = getValidWord(prefix)
+            
+            -- [NEW] RECOVERY LOGIC
+            -- If we can't find a word, it might be because the screen has garbage like "ED"
+            if not fullWord then 
+                -- warn("No word found for prefix: " .. prefix .. ". Attempting blind reset.")
+                clearText(15) -- SPAM BACKSPACE
+                task.wait(0.3) -- Give game time to process deletion
+                
+                -- Force loop to restart immediately to check new prefix
+                -- We do not break, we iterate to next attempt
+            else
+                -- We found a word!
+                local suffix = fullWord:sub(#prefix + 1)
+                
+                if suffix ~= "" then
+                    typeWord(suffix)
+                end
+                
+                task.wait(CONFIG.SubmitDelay)
+                submitWord()
+                
+                -- VERIFICATION
+                local checkTime = CONFIG.VerificationDelay
+                if attempt > 1 then checkTime = 0.4 end
+                
+                task.wait(checkTime)
+                
+                if not isOurTurn() then
+                    -- SUCCESS
+                    usedWords[fullWord:lower()] = true
+                    break
+                else
+                    -- FAILURE
+                    usedWords[fullWord:lower()] = true
+                    -- AGGRESSIVE CLEAR: Delete 15 chars to ensure we kill the bad word
+                    clearText(15)
+                    task.wait(0.2)
+                end
+            end
         end
     end
     
@@ -402,11 +421,10 @@ local function startMonitoring()
     task.spawn(function()
         while task.wait(0.1) do
             if CONFIG.Enabled then
-                -- [NEW] Anti-Crash Wrap
                 local success, err = pcall(autoPlay)
                 if not success then
-                    warn("AutoPlay Crashed (Resetting):", err)
-                    isProcessing = false -- Force reset state
+                    warn("AutoPlay Error:", err)
+                    isProcessing = false
                 end
             end
         end
@@ -438,10 +456,10 @@ local function createUltimateUI()
     local title = Instance.new("TextLabel")
     title.Size = UDim2.new(1, 0, 0, 30)
     title.BackgroundTransparency = 1
-    title.Text = "AutoPlay v5 (Crash Proof)"
+    title.Text = "AutoPlay v6 (Aggressive Recovery)"
     title.TextColor3 = Color3.fromRGB(0, 255, 200)
     title.Font = Enum.Font.GothamBlack
-    title.TextSize = 14
+    title.TextSize = 13
     title.Parent = frame
     
     -- [Toggle Button]
