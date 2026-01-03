@@ -25,68 +25,80 @@ local CONFIG = {
     MaxTotalTime = 3.5,        
     MinTotalTime = 1.2,        
     
-    ReactionMin = 0.8,      
-    ReactionMax = 1.5,      
+    ReactionMin = 0.5,      
+    ReactionMax = 1.2,      
     
     MistakeChance = 0.05,        
     MicroPauseChance = 0.1,
-    SubmitDelay = 0.1,        
+    SubmitDelay = 0.05,        
 }
 
 -- // DICTIONARY SYSTEM \\ --
--- We structure this as { ["A"] = {"apple", ...}, ["B"] = ... } for O(1) access speed
-local WORD_DATABASE = {} 
+-- Backup words (Used while downloading or if download fails)
+local STARTER_WORDS = {
+    A = { "apple", "about", "after", "again", "alarm", "allow", "angry", "apart", "apple", "apply", "aware" },
+    B = { "basic", "beach", "begin", "black", "block", "board", "boost", "bound", "brain", "brake", "bread" },
+    C = { "catch", "cause", "chain", "chair", "chart", "chase", "cheap", "check", "child", "class", "clean" },
+    D = { "dance", "death", "depth", "doubt", "draft", "drain", "dream", "dress", "drink", "drive", "drove" },
+    E = { "early", "earth", "eight", "empty", "enemy", "enjoy", "enter", "entry", "equal", "error", "event" },
+    F = { "faith", "false", "fault", "favor", "fence", "field", "fight", "final", "first", "flame", "flash" },
+    G = { "game", "gang", "gate", "gave", "gear", "gene", "gift", "girl", "give", "glad", "goal", "goes" },
+    H = { "habit", "hair", "half", "hall", "hand", "hang", "hard", "harm", "hate", "have", "head", "hear" },
+    I = { "idea", "image", "inch", "info", "into", "iron", "item", "icon", "iced", "idle", "idol", "ill" },
+    J = { "jack", "jail", "jam", "jar", "jaw", "jazz", "jeep", "jet", "jewel", "job", "join", "joke" },
+    K = { "keen", "keep", "kept", "kick", "kill", "kind", "king", "kiss", "kite", "knee", "knew", "knife" },
+    L = { "label", "lack", "lady", "laid", "lake", "lamp", "land", "lane", "large", "last", "late", "laugh" },
+    M = { "made", "mail", "main", "make", "male", "mama", "many", "map", "march", "mark", "mass", "mate" },
+    N = { "nail", "name", "narrow", "nation", "native", "navy", "near", "neat", "neck", "need", "neighbor" },
+    O = { "object", "ocean", "offer", "office", "often", "oil", "okay", "old", "olive", "once", "one" },
+    P = { "pace", "pack", "page", "paid", "pain", "pair", "pale", "palm", "pan", "panel", "panic" },
+    Q = { "quack", "quad", "quail", "quake", "quality", "quantity", "quart", "quarter", "queen", "queer", "query" },
+    R = { "race", "radio", "rain", "raise", "range", "rank", "rapid", "rare", "rate", "rather", "reach" },
+    S = { "scale", "scene", "scope", "score", "sense", "serve", "seven", "shade", "shake", "share", "sharp" },
+    T = { "table", "taste", "teach", "thank", "theme", "there", "thick", "thing", "think", "third", "those" },
+    U = { "ugly", "uncle", "under", "unit", "untie", "until", "upper", "upset", "urban", "urge", "usage" },
+    V = { "vacation", "valid", "valley", "value", "van", "vanish", "vapor", "variety", "various", "vary", "vase" },
+    W = { "waste", "watch", "water", "where", "which", "while", "white", "whole", "whose", "woman", "world" },
+    X = { "xray", "xenon", "xerox" },
+    Y = { "yacht", "yard", "year", "yellow", "yes", "yesterday", "yet", "yield", "yoghurt", "yolk", "young" },
+    Z = { "zebra", "zero", "zone", "zoo", "zoom" }
+}
+
+local WORD_DATABASE = STARTER_WORDS
 local usedWords = {}
 
--- Backup/Starter words to ensure it works immediately before HTTP loads
-local STARTER_WORDS = {
-    A = { "apple", "about", "after", "again", "alarm", "allow", "angry", "apart", "apple", "apply", "arena", "argue", "arise", "array", "aside", "asset", "audio", "audit", "avoid", "award", "aware" },
-    B = { "basic", "beach", "begin", "black", "block", "board", "boost", "bound", "brain", "brake", "bread", "break", "brick", "brief", "bring", "broad", "brown", "brush", "build", "bunch", "burst" },
-    -- (The loader will fill the rest, so we keep this small to save memory)
-}
-WORD_DATABASE = STARTER_WORDS
-
--- [Mega Dictionary Loader - Merged Feature]
+-- [Fixed Mega Dictionary Loader]
 local function loadExternalWordList()
-    local urls = {
-        "https://raw.githubusercontent.com/dwyl/english-words/refs/heads/master/words_dictionary.json",
-        "https://raw.githubusercontent.com/first20hours/google-10000-english/master/google-10000-english-usa-no-swears.txt"
-    }
+    -- This uses the specific dictionary your friend uses, but parses it safely
+    local url = "https://raw.githubusercontent.com/dwyl/english-words/refs/heads/master/words_dictionary.json"
     
-    print(" [Ultimate Script] Loading Mega Dictionary...")
+    print(" [Ultimate Script] Downloading Dictionary...")
     
+    local success, response = pcall(function() 
+        return game:HttpGet(url) 
+    end)
+    
+    if not success or not response then 
+        warn(" [Ultimate Script] Download failed. Using starter words.")
+        return 
+    end
+
     local newDB = {}
     local count = 0
     
-    for _, url in ipairs(urls) do
-        local success, response = pcall(function() return game:HttpGet(url) end)
-        if success and response then
-            -- Handle JSON format
-            if response:sub(1,1) == "{" then
-                local decoded = HttpService:JSONDecode(response)
-                for word, _ in pairs(decoded) do
-                    if #word >= CONFIG.MinWordLength then
-                        local first = word:sub(1, 1):upper()
-                        if not newDB[first] then newDB[first] = {} end
-                        table.insert(newDB[first], word)
-                        count = count + 1
-                    end
-                end
-            else
-                -- Handle Text format
-                for word in response:gmatch("%a+") do
-                    if #word >= CONFIG.MinWordLength then
-                        local first = word:sub(1, 1):upper()
-                        if not newDB[first] then newDB[first] = {} end
-                        table.insert(newDB[first], word)
-                        count = count + 1
-                    end
-                end
-            end
+    -- OPTIMIZED PARSER:
+    -- Instead of JSONDecode (which crashes on large files), we use pattern matching.
+    -- The file format is "word": 1. We look for words inside quotes followed by a colon.
+    for word in response:gmatch('"([%a]+)":') do
+        if #word >= CONFIG.MinWordLength then
+            local first = word:sub(1,1):upper()
+            if not newDB[first] then newDB[first] = {} end
+            table.insert(newDB[first], word)
+            count = count + 1
         end
     end
     
-    -- Merge starter words
+    -- Merge starter words into the new list (so we don't lose them)
     for letter, list in pairs(STARTER_WORDS) do
         if not newDB[letter] then newDB[letter] = {} end
         for _, word in ipairs(list) do
@@ -98,7 +110,7 @@ local function loadExternalWordList()
         WORD_DATABASE = newDB
         print(" [Ultimate Script] Successfully loaded " .. count .. " words!")
     else
-        warn(" [Ultimate Script] Failed to load external words. Using backup.")
+        warn(" [Ultimate Script] Parsed 0 words. Check URL or Format.")
     end
 end
 
@@ -110,16 +122,17 @@ local function getValidWord(prefix)
     if not prefix or prefix == "" then return nil end
     local startLetter = prefix:sub(1, 1):upper()
     local words = WORD_DATABASE[startLetter]
+    
+    -- If letter not found in DB, try to find any existing key or return nil
     if not words then return nil end
     
     local validWords = {}
     local prefixLower = prefix:lower()
     local prefixLen = #prefix
     
+    -- Fast filter
     for _, word in ipairs(words) do
-        -- Length Checks
-        if #word >= CONFIG.MinWordLength and #word <= CONFIG.MaxWordLength then
-            -- Prefix Match Check
+        if #word >= prefixLen and #word <= CONFIG.MaxWordLength then
             if word:sub(1, prefixLen):lower() == prefixLower then
                 if not usedWords[word:lower()] then
                     table.insert(validWords, word:lower())
@@ -128,10 +141,10 @@ local function getValidWord(prefix)
         end
     end
     
-    -- Retry with used words if we ran out of new ones
+    -- Retry with used words if necessary
     if #validWords == 0 then
         for _, word in ipairs(words) do
-            if #word >= CONFIG.MinWordLength and #word <= CONFIG.MaxWordLength then
+            if #word >= prefixLen and #word <= CONFIG.MaxWordLength then
                 if word:sub(1, prefixLen):lower() == prefixLower then
                     table.insert(validWords, word:lower())
                 end
@@ -141,9 +154,9 @@ local function getValidWord(prefix)
     
     if #validWords == 0 then return nil end
     
-    -- // STRATEGY SORTING ALGORITHM \\ --
+    -- // STRATEGY SORTING \\ --
     table.sort(validWords, function(a, b)
-        -- Strategy 1: Target Ending (Aggressive)
+        -- Strategy: Target Ending
         if CONFIG.Strategy == "Target" and CONFIG.TargetEnding ~= "" then
             local target = CONFIG.TargetEnding:lower()
             local aEnds = a:sub(-1) == target
@@ -152,25 +165,24 @@ local function getValidWord(prefix)
             if not aEnds and bEnds then return false end
         end
         
-        -- Strategy 2: Longest (Troll Mode)
+        -- Strategy: Longest (Troll Mode)
         if CONFIG.Strategy == "Longest" then
             return #a > #b
         end
         
-        -- Strategy 3: Shortest (Speed Mode)
+        -- Strategy: Shortest (Speed Mode)
         if CONFIG.Strategy == "Shortest" then
             return #a < #b
         end
         
-        -- Strategy 4: Random (Default/Fallback)
-        return false -- Keep original order (random-ish) or handle via random pick
+        -- Strategy: Random
+        return false 
     end)
     
     local selectedWord
     if CONFIG.Strategy == "Random" then
         selectedWord = validWords[math.random(1, #validWords)]
     else
-        -- Pick top result after sorting
         selectedWord = validWords[1]
     end
     
@@ -194,10 +206,8 @@ local function randomFloat(min, max)
 end
 
 local function typeWord(word, reactionDelay)
-    -- Calculate budget
     local targetTotalDuration = randomFloat(CONFIG.MinTotalTime, CONFIG.MaxTotalTime)
     
-    -- Adjust for long words (Troll Mode support)
     if #word > 10 then 
         targetTotalDuration = targetTotalDuration + (#word * 0.05) 
     end
@@ -209,33 +219,24 @@ local function typeWord(word, reactionDelay)
     local timeAvailableForTyping = targetTotalDuration - reactionDelay - CONFIG.SubmitDelay
     local avgDelayPerChar = timeAvailableForTyping / #word
     
-    -- Cap speed to prevent instant-ban speeds
-    if avgDelayPerChar < 0.03 then avgDelayPerChar = 0.03 end 
+    if avgDelayPerChar < 0.02 then avgDelayPerChar = 0.02 end 
     
     for i = 1, #word do
         local letter = string.sub(word, i, i)
         local currentDelay = avgDelayPerChar * randomFloat(0.8, 1.2)
         
-        -- Micro pauses for realism
+        -- Micro pauses
         if math.random() < CONFIG.MicroPauseChance and i > 1 then
-            currentDelay = currentDelay + randomFloat(0.1, 0.2)
+            currentDelay = currentDelay + randomFloat(0.1, 0.15)
         end
         
-        -- Mistake simulation (Only in non-intense modes)
-        if CONFIG.Strategy ~= "Longest" and math.random() < CONFIG.MistakeChance then
-            -- Type wrong key
-            local wrongKey = string.char(string.byte(letter) + 1)
-            typeLetter(wrongKey, 0.02)
-            task.wait(randomFloat(0.1, 0.2))
-            -- Backspace
-            VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.Backspace, false, game)
-            task.wait(0.05)
-            VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.Backspace, false, game)
-            task.wait(randomFloat(0.1, 0.2))
+        -- Speed up logic
+        if i > 1 and CONFIG.Strategy == "Shortest" then
+             currentDelay = currentDelay * 0.9 -- Type faster for short words
         end
-        
+
         task.wait(currentDelay)
-        typeLetter(letter, randomFloat(0.01, 0.05))
+        typeLetter(letter, randomFloat(0.01, 0.03))
     end
 end
 
@@ -245,28 +246,19 @@ local function submitWord()
     VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.Return, false, game)
 end
 
--- // GAME STATE DETECTION (Dual Method: UI + Log) \\ --
-
+-- // GAME STATE DETECTION \\ --
 local lastLogPattern = ""
 
--- [Merged Feature: Log Listener]
 LogService.MessageOut:Connect(function(message, messageType)
-    -- Pattern match for common game logs indicating required letters
     local pattern = "Word:%s*([A-Za-z]+)"
     local match = string.match(message, pattern)
-    if match then
-        lastLogPattern = match
-    end
+    if match then lastLogPattern = match end
     
-    -- Sometimes logs look like "Turn: PlayerName (AB)"
     local letters = string.match(message, "%((%u%u?)%)")
-    if letters then
-        lastLogPattern = letters
-    end
+    if letters then lastLogPattern = letters end
 end)
 
 local function getRequiredLetterLabel()
-    -- Method A: Read ScreenGui (Most Accurate)
     local success, result = pcall(function()
         local inGameUI = PlayerGui:FindFirstChild("InGame")
         if not inGameUI then return nil end
@@ -283,13 +275,10 @@ local function getRequiredLetterLabel()
         end
         return nil
     end)
-    
-    if success and result then return result end
-    return nil
+    return success and result or nil
 end
 
 local function getCurrentPrefix()
-    -- Method A: Visual Boxes
     local success, result = pcall(function()
         local inGameUI = PlayerGui:FindFirstChild("InGame")
         if not inGameUI then return "" end
@@ -315,12 +304,7 @@ local function getCurrentPrefix()
     end)
     
     if success and result and result ~= "" then return result end
-    
-    -- Method B: Fallback to LogService
-    if lastLogPattern ~= "" then
-        return lastLogPattern
-    end
-    
+    if lastLogPattern ~= "" then return lastLogPattern end
     return ""
 end
 
@@ -328,7 +312,6 @@ local function isOurTurn()
     local success, result = pcall(function()
         local inGameUI = PlayerGui:FindFirstChild("InGame")
         if not inGameUI then return false end
-        
         local frame = inGameUI:FindFirstChild("Frame")
         if not frame or not frame.Visible then return false end
         
@@ -338,9 +321,7 @@ local function isOurTurn()
         local typeLabel = frame:FindFirstChild("Type")
         if typeLabel and typeLabel:IsA("TextLabel") then
             local text = typeLabel.Text
-            local displayName = LocalPlayer.DisplayName
-            local userName = LocalPlayer.Name
-            if string.find(text, displayName) or string.find(text, userName) then
+            if string.find(text, LocalPlayer.DisplayName) or string.find(text, LocalPlayer.Name) then
                 return true
             end
         end
@@ -365,12 +346,11 @@ local function autoPlay()
     if not isOurTurn() then return end
     
     local now = tick()
-    if now - lastPlayTime < 1.0 then return end 
+    if now - lastPlayTime < 0.8 then return end 
     
     isProcessing = true
     lastPlayTime = now
     
-    -- 1. Identify letters
     local prefix = getCurrentPrefix()
     if prefix == "" then
         local req = getRequiredLetterLabel()
@@ -382,7 +362,6 @@ local function autoPlay()
         return
     end
     
-    -- 2. Find Word using Strategy
     local fullWord = getValidWord(prefix)
     if not fullWord then
         isProcessing = false
@@ -391,21 +370,16 @@ local function autoPlay()
     
     local suffix = fullWord:sub(#prefix + 1)
     
-    -- 3. Reaction Delay
     local reactionTime = randomFloat(CONFIG.ReactionMin, CONFIG.ReactionMax)
     task.wait(reactionTime)
     
-    -- 4. Type
     if suffix ~= "" then
         typeWord(suffix, reactionTime)
     end
     
-    -- 5. Submit
-    local finalDelay = CONFIG.SubmitDelay + randomFloat(0, 0.1)
-    task.wait(finalDelay)
+    task.wait(CONFIG.SubmitDelay)
     submitWord()
     
-    -- Clear log pattern to prevent stale data
     lastLogPattern = ""
     isProcessing = false
 end
@@ -419,15 +393,14 @@ local function startMonitoring()
         end
     end)
     
-    -- [Merged Feature: Auto Reset on Round Start]
     LocalPlayer:GetAttributeChangedSignal("InTable"):Connect(function()
         if LocalPlayer:GetAttribute("InTable") == true then
-            usedWords = {} -- New round, fresh memory
+            usedWords = {}
         end
     end)
 end
 
--- // ULTIMATE GUI CREATION \\ --
+-- // GUI CREATION \\ --
 local function createUltimateUI()
     if PlayerGui:FindFirstChild("UltimateWordUI") then
         PlayerGui.UltimateWordUI:Destroy()
@@ -445,11 +418,8 @@ local function createUltimateUI()
     frame.BorderSizePixel = 0
     frame.Parent = screenGui
     
-    local uiCorner = Instance.new("UICorner")
-    uiCorner.CornerRadius = UDim.new(0, 10)
-    uiCorner.Parent = frame
+    local uiCorner = Instance.new("UICorner"); uiCorner.CornerRadius = UDim.new(0, 10); uiCorner.Parent = frame
     
-    -- Title
     local title = Instance.new("TextLabel")
     title.Size = UDim2.new(1, 0, 0, 30)
     title.BackgroundTransparency = 1
@@ -459,7 +429,6 @@ local function createUltimateUI()
     title.TextSize = 16
     title.Parent = frame
     
-    -- [Toggle Button]
     local toggleBtn = Instance.new("TextButton")
     toggleBtn.Size = UDim2.new(0.9, 0, 0, 35)
     toggleBtn.Position = UDim2.new(0.05, 0, 0, 40)
@@ -471,7 +440,6 @@ local function createUltimateUI()
     toggleBtn.Parent = frame
     local tCorner = Instance.new("UICorner"); tCorner.CornerRadius = UDim.new(0,6); tCorner.Parent = toggleBtn
     
-    -- [Strategy Button (Merged Features)]
     local strategyBtn = Instance.new("TextButton")
     strategyBtn.Size = UDim2.new(0.9, 0, 0, 35)
     strategyBtn.Position = UDim2.new(0.05, 0, 0, 85)
@@ -483,7 +451,6 @@ local function createUltimateUI()
     strategyBtn.Parent = frame
     local sCorner = Instance.new("UICorner"); sCorner.CornerRadius = UDim.new(0,6); sCorner.Parent = strategyBtn
 
-    -- [Target Box]
     local targetLabel = Instance.new("TextLabel")
     targetLabel.Size = UDim2.new(1, 0, 0, 15)
     targetLabel.Position = UDim2.new(0, 0, 0, 125)
@@ -499,14 +466,13 @@ local function createUltimateUI()
     targetBox.Position = UDim2.new(0.05, 0, 0, 145)
     targetBox.BackgroundColor3 = Color3.fromRGB(40, 40, 50)
     targetBox.Text = ""
-    targetBox.PlaceholderText = "e.g. 'x' (Select Target Mode)"
+    targetBox.PlaceholderText = "e.g. 'x'"
     targetBox.TextColor3 = Color3.fromRGB(255, 255, 255)
     targetBox.Font = Enum.Font.Gotham
     targetBox.TextSize = 12
     targetBox.Parent = frame
     local tbCorner = Instance.new("UICorner"); tbCorner.CornerRadius = UDim.new(0,6); tbCorner.Parent = targetBox
 
-    -- [Reset Memory Button (New)]
     local resetBtn = Instance.new("TextButton")
     resetBtn.Size = UDim2.new(0.9, 0, 0, 30)
     resetBtn.Position = UDim2.new(0.05, 0, 0, 185)
@@ -518,18 +484,16 @@ local function createUltimateUI()
     resetBtn.Parent = frame
     local rCorner = Instance.new("UICorner"); rCorner.CornerRadius = UDim.new(0,6); rCorner.Parent = resetBtn
 
-    -- [Status Info]
     local statusLabel = Instance.new("TextLabel")
     statusLabel.Size = UDim2.new(1, 0, 0, 20)
     statusLabel.Position = UDim2.new(0, 0, 0, 225)
     statusLabel.BackgroundTransparency = 1
-    statusLabel.Text = "Waiting for turn..."
+    statusLabel.Text = "Waiting..."
     statusLabel.TextColor3 = Color3.fromRGB(120, 120, 120)
     statusLabel.Font = Enum.Font.Gotham
     statusLabel.TextSize = 11
     statusLabel.Parent = frame
 
-    -- [Events]
     toggleBtn.MouseButton1Click:Connect(function()
         CONFIG.Enabled = not CONFIG.Enabled
         toggleBtn.BackgroundColor3 = CONFIG.Enabled and Color3.fromRGB(0, 180, 100) or Color3.fromRGB(180, 60, 60)
@@ -546,7 +510,7 @@ local function createUltimateUI()
         strategyBtn.Text = "MODE: " .. CONFIG.Strategy:upper()
         
         if CONFIG.Strategy == "Longest" then
-             strategyBtn.TextColor3 = Color3.fromRGB(255, 100, 255) -- Troll Color
+             strategyBtn.TextColor3 = Color3.fromRGB(255, 100, 255)
         elseif CONFIG.Strategy == "Target" then
              strategyBtn.TextColor3 = Color3.fromRGB(100, 200, 255)
         else
@@ -561,28 +525,28 @@ local function createUltimateUI()
     
     resetBtn.MouseButton1Click:Connect(function()
         usedWords = {}
-        resetBtn.Text = "MEMORY CLEARED!"
+        resetBtn.Text = "CLEARED!"
         task.wait(1)
         resetBtn.Text = "RESET MEMORY"
     end)
     
-    -- Status Updater
     task.spawn(function()
         while task.wait(0.5) do
-            if not isInGame() then
-                statusLabel.Text = "Not in round"
-                statusLabel.TextColor3 = Color3.fromRGB(120,120,120)
-            elseif isOurTurn() then
-                statusLabel.Text = "YOUR TURN!"
-                statusLabel.TextColor3 = Color3.fromRGB(0,255,0)
-            else
-                statusLabel.Text = "Waiting..."
-                statusLabel.TextColor3 = Color3.fromRGB(200,200,200)
+            if screenGui.Parent then
+                if not isInGame() then
+                    statusLabel.Text = "Not in round"
+                    statusLabel.TextColor3 = Color3.fromRGB(120,120,120)
+                elseif isOurTurn() then
+                    statusLabel.Text = "YOUR TURN!"
+                    statusLabel.TextColor3 = Color3.fromRGB(0,255,0)
+                else
+                    statusLabel.Text = "Waiting..."
+                    statusLabel.TextColor3 = Color3.fromRGB(200,200,200)
+                end
             end
         end
     end)
     
-    -- Draggable Logic
     local dragging, dragInput, dragStart, startPos
     frame.InputBegan:Connect(function(input)
         if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
@@ -603,6 +567,12 @@ local function createUltimateUI()
         if input == dragInput and dragging then
             local delta = input.Position - dragStart
             frame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+        end
+    end)
+    
+    UserInputService.InputBegan:Connect(function(input)
+        if input.KeyCode == Enum.KeyCode.RightControl then
+            frame.Visible = not frame.Visible
         end
     end)
 end
