@@ -17,7 +17,7 @@ local CONFIG = {
     Strategy = "Shortest", 
     TargetEnding = "", 
     
-    MinWordLength = 2,
+    MinWordLength = 4,
     MaxWordLength = 35,
     
     -- ROUND SETTINGS
