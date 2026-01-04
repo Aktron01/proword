@@ -65,13 +65,10 @@ local usedWords = {}
 
 -- [Dictionary Loader]
 task.spawn(function()
-    local url = "https://ezken.xyz/jsonwords/refs/heads/main/mainword.json"
-    -- Note: kept original logic, assuming url structure is correct for raw data
-    -- If using ezken link redirect, ensure it returns raw text. 
-    -- If using github raw, keep the github link. I will use the one provided in previous context.
-    local rawUrl = "https://raw.githubusercontent.com/Aktron01/jsonwords/refs/heads/main/mainword.json" 
+    -- UPDATED MAIN URL
+    local url = "https://raw.githubusercontent.com/Aktron01/jsonwords/refs/heads/main/mainword.json"
     
-    local success, response = pcall(function() return game:HttpGet(rawUrl) end)
+    local success, response = pcall(function() return game:HttpGet(url) end)
     
     if not success or not response then 
         warn(" [Ultimate] Download failed. Using starter words.")
@@ -99,7 +96,7 @@ task.spawn(function()
     
     if count > 0 then
         WORD_DATABASE = newDB
-        print(" [Ultimate] Loaded " .. count .. " words.")
+        print(" [Ultimate] Loaded " .. count .. " words from Main URL.")
     end
 end)
 
@@ -342,7 +339,7 @@ local function createUltimateUI()
     
     -- MAIN FRAME
     local frame = Instance.new("Frame")
-    frame.Size = UDim2.new(0, 240, 0, 320) -- Made wider to fit 3 elements
+    frame.Size = UDim2.new(0, 240, 0, 320) 
     frame.Position = UDim2.new(0, 20, 0.5, -160)
     frame.BackgroundColor3 = Color3.fromRGB(20, 20, 25)
     frame.BorderSizePixel = 0
@@ -719,4 +716,4 @@ task.spawn(function()
 end)
 
 createUltimateUI()
-print(" [Ultimate] Loaded with PLAY and CHAT buttons.")
+print(" [Ultimate] Loaded with PLAY and CHAT buttons (GitHub URL Updated).")
