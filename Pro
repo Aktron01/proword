@@ -17,27 +17,35 @@ local CONFIG = {
     Strategy = "Shortest", 
     TargetEnding = "", 
     
-    MinWordLength = 4,
+    MinWordLength = 3, -- Lowered slightly to ensure matches
     MaxWordLength = 35,
     
     -- ROUND SETTINGS
     RoundDuration = 15,
-    PanicThreshold = 5,    -- If time < 5s, skip reaction delay
-    SafeModeThreshold = 8,
+    PanicThreshold = 4,    -- If time < 4s, go crazy fast
+    SafeModeThreshold = 6, -- If time < 6s, ignore "Longest" strategy and just survive
     
     -- HUMANIZATION SETTINGS
     HumanMode = true,        
     SpeedMultiplier = 1.0, 
     
     -- REACTION DELAY (Seconds)
-    ReactionMin = 0.5,
-    ReactionMax = 1.0,
+    ReactionMin = 0.4,
+    ReactionMax = 0.8,
     
     MistakeChance = 0.08,        
     MicroPauseChance = 0.15,
     SubmitDelay = 0.05, 
     
     VerificationDelay = 0.8,
+}
+
+-- // UI COLORS \\ --
+local STRATEGY_COLORS = {
+    Shortest = Color3.fromRGB(0, 255, 128),   -- Greenish
+    Longest = Color3.fromRGB(255, 60, 60),    -- Red
+    Target = Color3.fromRGB(170, 85, 255),    -- Purple
+    Random = Color3.fromRGB(255, 200, 50)     -- Yellow/Orange
 }
 
 -- // DICTIONARY SYSTEM \\ --
@@ -118,7 +126,7 @@ local function typeWord(word)
     
     if len <= 4 then targetDuration = randomFloat(1.5, 2.5)
     elseif len <= 9 then targetDuration = randomFloat(3.0, 5.0)
-    else targetDuration = randomFloat(5.0, 10.0) end
+    else targetDuration = randomFloat(4.5, 8.0) end -- Faster for long words
     
     targetDuration = targetDuration / CONFIG.SpeedMultiplier 
     local avgDelay = targetDuration / len
@@ -145,6 +153,7 @@ local function typeWord(word)
             
             local adjustedMistakeChance = CONFIG.MistakeChance
             if CONFIG.SpeedMultiplier > 1.5 then adjustedMistakeChance = 0.02 end
+            if CONFIG.Strategy == "Longest" then adjustedMistakeChance = 0.01 end -- Less mistakes on long words
             
             if math.random() < adjustedMistakeChance then
                  local wrongKey = string.char(string.byte(letter) + 1)
@@ -170,7 +179,8 @@ end
 
 -- // WORD SEARCH LOGIC \\ --
 
-local function getMatchingWords(prefix, limit)
+-- REFINED: No longer limits result count here, giving "Longest" mode access to all words
+local function getMatchingWords(prefix)
     if not prefix or prefix == "" then return {} end
     local startLetter = prefix:sub(1, 1):upper()
     local words = WORD_DATABASE[startLetter]
@@ -201,21 +211,11 @@ local function getMatchingWords(prefix, limit)
         end
     end
     
-    -- Sort primarily by length for display
-    table.sort(matches, function(a, b) 
-        return #a < #b -- Show shortest first in the suggestion box
-    end)
-
-    -- Return only the requested amount
-    local result = {}
-    for i = 1, math.min(#matches, limit) do
-        table.insert(result, matches[i])
-    end
-    return result
+    return matches
 end
 
 local function getValidWord(prefix)
-    local possibilities = getMatchingWords(prefix, 500) -- Get many
+    local possibilities = getMatchingWords(prefix) -- Get ALL possibilities
     if #possibilities == 0 then return nil end
     
     local timeElapsed = tick() - TurnStartTime
@@ -223,7 +223,10 @@ local function getValidWord(prefix)
     local forceShort = (timeLeft < CONFIG.SafeModeThreshold)
     
     table.sort(possibilities, function(a, b)
+        -- If running out of time, FORCE shortest to survive
         if forceShort then return #a < #b end
+        
+        -- Strategy Sorting
         if CONFIG.Strategy == "Target" and CONFIG.TargetEnding ~= "" then
             local target = CONFIG.TargetEnding:lower()
             local aEnds = a:sub(-1) == target
@@ -231,8 +234,10 @@ local function getValidWord(prefix)
             if aEnds and not bEnds then return true end
             if not aEnds and bEnds then return false end
         end
-        if CONFIG.Strategy == "Longest" then return #a > #b end
+        
+        if CONFIG.Strategy == "Longest" then return #a > #b end -- This now works because list isn't pre-cut
         if CONFIG.Strategy == "Shortest" then return #a < #b end
+        
         return false 
     end)
     
@@ -323,8 +328,8 @@ local function isOurTurn()
 end
 
 -- // ULTIMATE GUI & SUGGESTION BOX \\ --
-local suggestionFrame -- Reference for updates
-local updateSuggestions -- Function reference
+local suggestionFrame
+local updateSuggestions 
 
 local function createUltimateUI()
     if PlayerGui:FindFirstChild("UltimateWordUI") then
@@ -348,10 +353,10 @@ local function createUltimateUI()
     
     local uiCorner = Instance.new("UICorner"); uiCorner.CornerRadius = UDim.new(0, 10); uiCorner.Parent = frame
     
-    -- SUGGESTION BOX (The requested addition)
+    -- SUGGESTION BOX
     suggestionFrame = Instance.new("Frame")
     suggestionFrame.Size = UDim2.new(0, 180, 0, 320)
-    suggestionFrame.Position = UDim2.new(1, 10, 0, 0) -- Attached to right side
+    suggestionFrame.Position = UDim2.new(1, 10, 0, 0) 
     suggestionFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 30)
     suggestionFrame.BorderSizePixel = 0
     suggestionFrame.Parent = frame
@@ -372,19 +377,21 @@ local function createUltimateUI()
     listLayout.SortOrder = Enum.SortOrder.LayoutOrder
     listLayout.Padding = UDim.new(0, 5)
 
-    -- Padding for list
     local padding = Instance.new("UIPadding")
     padding.PaddingTop = UDim.new(0, 35)
     padding.Parent = suggestionFrame
 
     -- Function to refresh the suggestions
     updateSuggestions = function(prefix)
-        -- Clear old buttons
         for _, child in pairs(suggestionFrame:GetChildren()) do
             if child:IsA("TextButton") then child:Destroy() end
         end
 
-        local words = getMatchingWords(prefix, 5) -- Get top 5
+        local words = getMatchingWords(prefix)
+        
+        -- Sort suggestions by Shortest for easier reading, or match strategy?
+        -- Generally for manual assist, shortest is easiest to read.
+        table.sort(words, function(a,b) return #a < #b end)
         
         if #words == 0 then
             local info = Instance.new("TextButton")
@@ -398,7 +405,9 @@ local function createUltimateUI()
             return
         end
 
-        for i, word in ipairs(words) do
+        local limit = 5
+        for i = 1, math.min(#words, limit) do
+            local word = words[i]
             local btn = Instance.new("TextButton")
             btn.Size = UDim2.new(0.9, 0, 0, 45)
             btn.BackgroundColor3 = Color3.fromRGB(40, 45, 60)
@@ -410,12 +419,10 @@ local function createUltimateUI()
             
             local bCorner = Instance.new("UICorner"); bCorner.CornerRadius = UDim.new(0,6); bCorner.Parent = btn
             
-            -- Manual Click Handler
             btn.MouseButton1Click:Connect(function()
                 task.spawn(function()
                     usedWords[word:lower()] = true
                     
-                    -- If user clicks, we assume they want to type ONLY the suffix if text exists
                     local currentP = getCurrentPrefix()
                     local suffix = word
                     if #currentP > 0 and word:lower():sub(1, #currentP) == currentP:lower() then
@@ -428,7 +435,7 @@ local function createUltimateUI()
                     task.wait(CONFIG.SubmitDelay)
                     submitWord()
                     
-                    btn.BackgroundColor3 = Color3.fromRGB(0, 255, 100) -- Green feedback
+                    btn.BackgroundColor3 = Color3.fromRGB(0, 255, 100) 
                     btn.Text = "SENT!"
                     task.wait(0.5)
                     btn:Destroy()
@@ -437,7 +444,7 @@ local function createUltimateUI()
         end
     end
 
-    -- REST OF MAIN UI ELEMENTS (Your original UI)
+    -- UI ELEMENTS
     local title = Instance.new("TextLabel")
     title.Size = UDim2.new(1, 0, 0, 30)
     title.BackgroundTransparency = 1
@@ -461,9 +468,10 @@ local function createUltimateUI()
     local strategyBtn = Instance.new("TextButton")
     strategyBtn.Size = UDim2.new(0.9, 0, 0, 35)
     strategyBtn.Position = UDim2.new(0.05, 0, 0, 85)
-    strategyBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 80)
+    -- Initialize color
+    strategyBtn.BackgroundColor3 = STRATEGY_COLORS[CONFIG.Strategy] or Color3.fromRGB(60,60,80)
     strategyBtn.Text = "MODE: " .. CONFIG.Strategy:upper()
-    strategyBtn.TextColor3 = Color3.fromRGB(255, 220, 100)
+    strategyBtn.TextColor3 = Color3.fromRGB(255, 255, 255) -- Changed text to white for better contrast
     strategyBtn.Font = Enum.Font.GothamBold
     strategyBtn.TextSize = 13
     strategyBtn.Parent = frame
@@ -570,6 +578,11 @@ local function createUltimateUI()
         if sIndex > #strategies then sIndex = 1 end
         CONFIG.Strategy = strategies[sIndex]
         strategyBtn.Text = "MODE: " .. CONFIG.Strategy:upper()
+        
+        -- UPDATE COLOR HERE
+        if STRATEGY_COLORS[CONFIG.Strategy] then
+            strategyBtn.BackgroundColor3 = STRATEGY_COLORS[CONFIG.Strategy]
+        end
     end)
     
     targetBox:GetPropertyChangedSignal("Text"):Connect(function()
@@ -597,7 +610,7 @@ local function createUltimateUI()
             if screenGui.Parent and isOurTurn() then
                 local timeLeft = CONFIG.RoundDuration - (tick() - TurnStartTime)
                 statusLabel.Text = "YOUR TURN: " .. math.floor(timeLeft) .. "s"
-                statusLabel.TextColor3 = (timeLeft < 5) and Color3.fromRGB(255, 50, 50) or Color3.fromRGB(0, 255, 0)
+                statusLabel.TextColor3 = (timeLeft < CONFIG.PanicThreshold) and Color3.fromRGB(255, 50, 50) or Color3.fromRGB(0, 255, 0)
             else
                 statusLabel.Text = "Scanning..."
                 statusLabel.TextColor3 = Color3.fromRGB(150, 150, 150)
@@ -681,4 +694,4 @@ task.spawn(function()
 end)
 
 createUltimateUI()
-print(" [Ultimate] Loaded with Manual Assist Panel.")
+print(" [Ultimate] Loaded with Fixed Modes & Colors.")
