@@ -108,21 +108,41 @@ local function getValidWord(prefix)
     local prefixLower = prefix:lower()
     local prefixLen = #prefix
     
+    -- Check if we are targeting X and need to filter ox/ex/ax
+    local avoidTrapWords = (CONFIG.Strategy == "Target" and CONFIG.TargetEnding:lower() == "x")
+
     for _, word in ipairs(words) do
         if #word >= prefixLen and #word <= CONFIG.MaxWordLength then
             if word:sub(1, prefixLen):lower() == prefixLower then
-                if not usedWords[word:lower()] then
-                    table.insert(validWords, word:lower())
+                local wordLower = word:lower()
+                
+                -- FILTER LOGIC START
+                local isSafe = true
+                if avoidTrapWords then
+                    local ending = wordLower:sub(-2)
+                    if ending == "ax" or ending == "ex" or ending == "ox" then
+                        isSafe = false
+                    end
+                end
+                -- FILTER LOGIC END
+
+                if isSafe and not usedWords[wordLower] then
+                    table.insert(validWords, wordLower)
                 end
             end
         end
     end
     
+    -- Fallback: If strict filtering found nothing, try to find ANY word (ignoring the filter)
+    -- This prevents the bot from dying if the ONLY options are ox/ax/ex words.
     if #validWords == 0 then
         for _, word in ipairs(words) do
             if #word >= prefixLen and #word <= CONFIG.MaxWordLength then
                 if word:sub(1, prefixLen):lower() == prefixLower then
-                    table.insert(validWords, word:lower())
+                     -- We re-add words even if they are trap words, just to survive the turn
+                    if not usedWords[word:lower()] then
+                        table.insert(validWords, word:lower())
+                    end
                 end
             end
         end
