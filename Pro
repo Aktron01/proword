@@ -179,7 +179,6 @@ end
 
 -- // WORD SEARCH LOGIC \\ --
 
--- REFINED: No longer limits result count here, giving "Longest" mode access to all words
 local function getMatchingWords(prefix)
     if not prefix or prefix == "" then return {} end
     local startLetter = prefix:sub(1, 1):upper()
@@ -235,7 +234,7 @@ local function getValidWord(prefix)
             if not aEnds and bEnds then return false end
         end
         
-        if CONFIG.Strategy == "Longest" then return #a > #b end -- This now works because list isn't pre-cut
+        if CONFIG.Strategy == "Longest" then return #a > #b end 
         if CONFIG.Strategy == "Shortest" then return #a < #b end
         
         return false 
@@ -355,7 +354,7 @@ local function createUltimateUI()
     
     -- SUGGESTION BOX
     suggestionFrame = Instance.new("Frame")
-    suggestionFrame.Size = UDim2.new(0, 180, 0, 320)
+    suggestionFrame.Size = UDim2.new(0, 200, 0, 320) -- Made slightly wider for button
     suggestionFrame.Position = UDim2.new(1, 10, 0, 0) 
     suggestionFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 30)
     suggestionFrame.BorderSizePixel = 0
@@ -384,17 +383,15 @@ local function createUltimateUI()
     -- Function to refresh the suggestions
     updateSuggestions = function(prefix)
         for _, child in pairs(suggestionFrame:GetChildren()) do
-            if child:IsA("TextButton") then child:Destroy() end
+            if child:IsA("Frame") then child:Destroy() end -- Destroy suggestion rows
+            if child:IsA("TextButton") then child:Destroy() end -- Destroy old style buttons
         end
 
         local words = getMatchingWords(prefix)
-        
-        -- Sort suggestions by Shortest for easier reading, or match strategy?
-        -- Generally for manual assist, shortest is easiest to read.
         table.sort(words, function(a,b) return #a < #b end)
         
         if #words == 0 then
-            local info = Instance.new("TextButton")
+            local info = Instance.new("TextButton") -- Keep as button just for easy text display
             info.Size = UDim2.new(0.9, 0, 0, 40)
             info.BackgroundTransparency = 1
             info.Text = (prefix == "") and "Waiting..." or "No words found"
@@ -405,21 +402,44 @@ local function createUltimateUI()
             return
         end
 
-        local limit = 5
+        local limit = 6
         for i = 1, math.min(#words, limit) do
             local word = words[i]
-            local btn = Instance.new("TextButton")
-            btn.Size = UDim2.new(0.9, 0, 0, 45)
-            btn.BackgroundColor3 = Color3.fromRGB(40, 45, 60)
-            btn.Text = word:upper()
-            btn.TextColor3 = Color3.fromRGB(255, 255, 255)
-            btn.Font = Enum.Font.GothamBold
-            btn.TextSize = 14
-            btn.Parent = suggestionFrame
             
-            local bCorner = Instance.new("UICorner"); bCorner.CornerRadius = UDim.new(0,6); bCorner.Parent = btn
+            -- CONTAINER ROW
+            local row = Instance.new("Frame")
+            row.Size = UDim2.new(0.9, 0, 0, 40)
+            row.BackgroundColor3 = Color3.fromRGB(40, 45, 60)
+            row.Parent = suggestionFrame
+            local rCorner = Instance.new("UICorner"); rCorner.CornerRadius = UDim.new(0,6); rCorner.Parent = row
             
-            btn.MouseButton1Click:Connect(function()
+            -- WORD LABEL
+            local wordLbl = Instance.new("TextLabel")
+            wordLbl.Size = UDim2.new(0.65, -5, 1, 0)
+            wordLbl.Position = UDim2.new(0, 10, 0, 0)
+            wordLbl.BackgroundTransparency = 1
+            wordLbl.Text = word:upper()
+            wordLbl.TextColor3 = Color3.fromRGB(255, 255, 255)
+            wordLbl.Font = Enum.Font.GothamBold
+            wordLbl.TextSize = 13
+            wordLbl.TextXAlignment = Enum.TextXAlignment.Left
+            wordLbl.Parent = row
+            
+            -- TYPE BUTTON
+            local actionBtn = Instance.new("TextButton")
+            actionBtn.Size = UDim2.new(0.3, 0, 0.8, 0)
+            actionBtn.AnchorPoint = Vector2.new(1, 0.5)
+            actionBtn.Position = UDim2.new(1, -5, 0.5, 0)
+            actionBtn.BackgroundColor3 = Color3.fromRGB(0, 180, 100)
+            actionBtn.Text = "TYPE"
+            actionBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+            actionBtn.Font = Enum.Font.GothamBlack
+            actionBtn.TextSize = 11
+            actionBtn.Parent = row
+            local aCorner = Instance.new("UICorner"); aCorner.CornerRadius = UDim.new(0,4); aCorner.Parent = actionBtn
+            
+            -- ACTION LOGIC
+            actionBtn.MouseButton1Click:Connect(function()
                 task.spawn(function()
                     usedWords[word:lower()] = true
                     
@@ -429,16 +449,17 @@ local function createUltimateUI()
                         suffix = word:sub(#currentP + 1)
                     end
                     
+                    actionBtn.Text = "..."
+                    actionBtn.BackgroundColor3 = Color3.fromRGB(200, 200, 200)
+                    
                     if suffix ~= "" then
                         typeWord(suffix)
                     end
                     task.wait(CONFIG.SubmitDelay)
                     submitWord()
                     
-                    btn.BackgroundColor3 = Color3.fromRGB(0, 255, 100) 
-                    btn.Text = "SENT!"
-                    task.wait(0.5)
-                    btn:Destroy()
+                    actionBtn.BackgroundColor3 = Color3.fromRGB(0, 255, 100) 
+                    actionBtn.Text = "DONE"
                 end)
             end)
         end
@@ -597,9 +618,9 @@ local function createUltimateUI()
         resetBtn.Text = "RESET MEMORY"
     end)
 
-    -- Right Ctrl Toggle
+    -- Toggle Logic: Left OR Right Control
     UserInputService.InputBegan:Connect(function(input)
-        if input.KeyCode == Enum.KeyCode.RightControl then
+        if input.KeyCode == Enum.KeyCode.RightControl or input.KeyCode == Enum.KeyCode.LeftControl then
             frame.Visible = not frame.Visible
         end
     end)
@@ -694,4 +715,4 @@ task.spawn(function()
 end)
 
 createUltimateUI()
-print(" [Ultimate] Loaded with Fixed Modes & Colors.")
+print(" [Ultimate] Loaded with Assist Button & Toggle Fix.")
