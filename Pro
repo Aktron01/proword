@@ -8,7 +8,6 @@ local HttpService = game:GetService("HttpService")
 
 local LocalPlayer = Players.LocalPlayer
 local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
-local Mouse = LocalPlayer:GetMouse()
 
 -- // ULTIMATE CONFIGURATION \\ --
 local CONFIG = {
@@ -21,24 +20,21 @@ local CONFIG = {
     MinWordLength = 3, 
     MaxWordLength = 35,
     
-    -- ROUND SETTINGS (Dynamic)
+    -- ROUND SETTINGS
     RoundDuration = 15,
     PanicThreshold = 4,   
     SafeModeThreshold = 6, 
     
-    -- HUMANIZATION SETTINGS
-    HumanMode = true,        
+    -- SPEED SETTINGS
     SpeedMultiplier = 1.0, 
-    
-    -- REACTION DELAY (Seconds)
     ReactionMin = 0.4,
     ReactionMax = 0.8,
+    SubmitDelay = 0.05, 
+    VerificationDelay = 0.8,
     
+    -- Humanization
     MistakeChance = 0.08,        
     MicroPauseChance = 0.15,
-    SubmitDelay = 0.05, 
-    
-    VerificationDelay = 0.8,
 }
 
 -- // UI COLORS \\ --
@@ -65,9 +61,7 @@ local usedWords = {}
 
 -- [Dictionary Loader]
 task.spawn(function()
-    -- UPDATED MAIN URL
     local url = "https://raw.githubusercontent.com/Aktron01/word33/refs/heads/main/mainword.json"
-    
     local success, response = pcall(function() return game:HttpGet(url) end)
     
     if not success or not response then 
@@ -77,7 +71,6 @@ task.spawn(function()
 
     local newDB = {}
     local count = 0
-    
     for word in response:gmatch('"([%a]+)":') do
         if #word >= CONFIG.MinWordLength then
             local first = word:sub(1,1):upper()
@@ -86,24 +79,16 @@ task.spawn(function()
             count = count + 1
         end
     end
-    
     for letter, list in pairs(STARTER_WORDS) do
         if not newDB[letter] then newDB[letter] = {} end
-        for _, word in ipairs(list) do
-            table.insert(newDB[letter], word)
-        end
+        for _, word in ipairs(list) do table.insert(newDB[letter], word) end
     end
-    
-    if count > 0 then
-        WORD_DATABASE = newDB
-        print(" [Ultimate] Loaded " .. count .. " words from Main URL.")
-    end
+    if count > 0 then WORD_DATABASE = newDB end
 end)
 
 -- // GLOBAL STATE \\ --
 local TurnStartTime = 0
 local isProcessing = false 
-local lastProcessTime = 0 
 local currentTurnBase = "" 
 
 -- // LOGIC FUNCTIONS \\ --
@@ -112,45 +97,40 @@ local function randomFloat(min, max)
     return min + math.random() * (max - min)
 end
 
--- Function to send to public chat (Legacy or Modern)
 local function sendToPublicChat(message)
-    -- Method 1: Modern TextChatService
     if TextChatService.ChatVersion == Enum.ChatVersion.TextChatService then
         local channel = TextChatService.TextChannels:FindFirstChild("RBXGeneral")
-        if channel then
-            channel:SendAsync(message)
-            return
-        end
+        if channel then channel:SendAsync(message) return end
     end
-
-    -- Method 2: Legacy Chat Event
     local legacyEvent = ReplicatedStorage:FindFirstChild("DefaultChatSystemChatEvents")
     if legacyEvent then
         local sayRequest = legacyEvent:FindFirstChild("SayMessageRequest")
-        if sayRequest then
-            sayRequest:FireServer(message, "All")
-            return
-        end
+        if sayRequest then sayRequest:FireServer(message, "All") return end
     end
-    
-    warn("Could not find a valid chat method.")
 end
 
-local function typeLetter(letter, fastMode)
+local function typeLetter(letter)
     local keyCode = Enum.KeyCode[string.upper(letter)]
     if keyCode then
         VirtualInputManager:SendKeyEvent(true, keyCode, false, game)
-        if not fastMode then
-            task.wait(randomFloat(0.015, 0.035)) 
-        end
         VirtualInputManager:SendKeyEvent(false, keyCode, false, game)
     end
 end
 
 local function typeWord(word)
     local len = #word
-    local targetDuration = 0
     
+    -- [[ INSTANT MODE CHECK ]] --
+    if CONFIG.RoundDuration == 5 then
+        -- NO DELAYS, JUST SEND IT
+        for i = 1, len do
+            typeLetter(string.sub(word, i, i))
+        end
+        return
+    end
+    
+    -- Normal Human Logic
+    local targetDuration = 0
     if len <= 4 then targetDuration = randomFloat(1.5, 2.5)
     elseif len <= 9 then targetDuration = randomFloat(3.0, 5.0)
     else targetDuration = randomFloat(4.5, 8.0) end
@@ -160,15 +140,14 @@ local function typeWord(word)
     
     for i = 1, len do
         local timeLeft = 10 
-        if TurnStartTime > 0 then
-             timeLeft = CONFIG.RoundDuration - (tick() - TurnStartTime)
-        end
+        if TurnStartTime > 0 then timeLeft = CONFIG.RoundDuration - (tick() - TurnStartTime) end
         
         local isPanic = timeLeft < CONFIG.PanicThreshold
         local letter = string.sub(word, i, i)
         
+        typeLetter(letter)
+        
         if isPanic then
-            typeLetter(letter, true)
             task.wait() 
         else
             local currentDelay = avgDelay * randomFloat(0.7, 1.3)
@@ -176,24 +155,22 @@ local function typeWord(word)
                 currentDelay = currentDelay + randomFloat(0.15, 0.3)
             end
             task.wait(currentDelay)
-            typeLetter(letter, false)
         end
     end
 end
 
 local function submitWord()
     VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.Return, false, game)
-    task.wait(0.02)
+    if CONFIG.RoundDuration ~= 5 then task.wait(0.02) end
     VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.Return, false, game)
 end
 
--- // WORD SEARCH LOGIC \\ --
+-- // SEARCH & GAME LOGIC \\ --
 
 local function getMatchingWords(prefix)
     if not prefix or prefix == "" then return {} end
     local startLetter = prefix:sub(1, 1):upper()
     local words = WORD_DATABASE[startLetter]
-    
     if not words then return {} end
     
     local matches = {}
@@ -210,14 +187,10 @@ local function getMatchingWords(prefix)
                     local ending = wordLower:sub(-2)
                     if ending == "ax" or ending == "ex" or ending == "ox" then isSafe = false end
                 end
-
-                if isSafe and not usedWords[wordLower] then
-                    table.insert(matches, wordLower)
-                end
+                if isSafe and not usedWords[wordLower] then table.insert(matches, wordLower) end
             end
         end
     end
-    
     return matches
 end
 
@@ -250,12 +223,8 @@ local function getValidWord(prefix)
     end
 end
 
--- // GAME STATE DETECTION \\ --
-
 local function getGameFrame()
-    local success, frame = pcall(function()
-        return PlayerGui.InGame.Frame
-    end)
+    local success, frame = pcall(function() return PlayerGui.InGame.Frame end)
     return success and frame or nil
 end
 
@@ -323,25 +292,23 @@ local function isOurTurn()
     return false
 end
 
--- // ULTIMATE GUI & SUGGESTION BOX \\ --
+-- // COMPACT UI SYSTEM \\ --
 local suggestionFrame
 local updateSuggestions 
 
 local function createUltimateUI()
-    if PlayerGui:FindFirstChild("UltimateWordUI") then
-        PlayerGui.UltimateWordUI:Destroy()
-    end
+    if PlayerGui:FindFirstChild("UltimateWordUI") then PlayerGui.UltimateWordUI:Destroy() end
 
     local screenGui = Instance.new("ScreenGui")
     screenGui.Name = "UltimateWordUI"
     screenGui.ResetOnSpawn = false
     screenGui.Parent = PlayerGui
     
-    -- MAIN FRAME
+    -- [[ MAIN COMPACT FRAME ]] --
     local frame = Instance.new("Frame")
-    -- INCREASED HEIGHT TO FIT NEW BUTTON
-    frame.Size = UDim2.new(0, 240, 0, 360) 
-    frame.Position = UDim2.new(0, 20, 0.5, -180)
+    -- Much smaller size and higher position
+    frame.Size = UDim2.new(0, 200, 0, 230) 
+    frame.Position = UDim2.new(0, 10, 0.15, 0) -- Top Left
     frame.BackgroundColor3 = Color3.fromRGB(20, 20, 25)
     frame.BorderSizePixel = 0
     frame.Active = true
@@ -350,326 +317,148 @@ local function createUltimateUI()
     
     local uiCorner = Instance.new("UICorner"); uiCorner.CornerRadius = UDim.new(0, 10); uiCorner.Parent = frame
     
-    -- SUGGESTION BOX
+    -- SUGGESTION BOX (To the Right of Main Frame)
     suggestionFrame = Instance.new("Frame")
-    suggestionFrame.Size = UDim2.new(0, 220, 0, 320) 
-    suggestionFrame.Position = UDim2.new(1, 10, 0, 0) 
+    suggestionFrame.Size = UDim2.new(0, 200, 0, 230) 
+    suggestionFrame.Position = UDim2.new(1, 5, 0, 0) 
     suggestionFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 30)
     suggestionFrame.BorderSizePixel = 0
     suggestionFrame.Parent = frame
     local sgCorner = Instance.new("UICorner"); sgCorner.CornerRadius = UDim.new(0, 10); sgCorner.Parent = suggestionFrame
     
-    local sgTitle = Instance.new("TextLabel")
-    sgTitle.Size = UDim2.new(1, 0, 0, 30)
-    sgTitle.BackgroundTransparency = 1
-    sgTitle.Text = "MANUAL ASSIST"
-    sgTitle.TextColor3 = Color3.fromRGB(0, 200, 255)
-    sgTitle.Font = Enum.Font.GothamBlack
-    sgTitle.TextSize = 12
-    sgTitle.Parent = suggestionFrame
-
     local listLayout = Instance.new("UIListLayout")
     listLayout.Parent = suggestionFrame
     listLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
     listLayout.SortOrder = Enum.SortOrder.LayoutOrder
-    listLayout.Padding = UDim.new(0, 5)
+    listLayout.Padding = UDim.new(0, 3)
+    local padding = Instance.new("UIPadding"); padding.PaddingTop = UDim.new(0, 5); padding.Parent = suggestionFrame
 
-    local padding = Instance.new("UIPadding")
-    padding.PaddingTop = UDim.new(0, 35)
-    padding.Parent = suggestionFrame
-
-    -- Function to refresh the suggestions
     updateSuggestions = function(prefix)
         for _, child in pairs(suggestionFrame:GetChildren()) do
-            if child:IsA("Frame") then child:Destroy() end 
-            if child:IsA("TextButton") then child:Destroy() end 
+            if child:IsA("Frame") or child:IsA("TextButton") then child:Destroy() end 
         end
 
         local words = getMatchingWords(prefix)
         table.sort(words, function(a,b) return #a < #b end)
         
-        if #words == 0 then
-            local info = Instance.new("TextButton")
-            info.Size = UDim2.new(0.9, 0, 0, 40)
-            info.BackgroundTransparency = 1
-            info.Text = (prefix == "") and "Waiting..." or "No words found"
-            info.TextColor3 = Color3.fromRGB(100,100,100)
-            info.Font = Enum.Font.Gotham
-            info.TextSize = 12
-            info.Parent = suggestionFrame
-            return
-        end
-
-        local limit = 6
+        local limit = 5
         for i = 1, math.min(#words, limit) do
             local word = words[i]
-            
-            -- CONTAINER ROW
             local row = Instance.new("Frame")
-            row.Size = UDim2.new(0.95, 0, 0, 40)
+            row.Size = UDim2.new(0.95, 0, 0, 35) -- Smaller Rows
             row.BackgroundColor3 = Color3.fromRGB(40, 45, 60)
             row.Parent = suggestionFrame
-            local rCorner = Instance.new("UICorner"); rCorner.CornerRadius = UDim.new(0,6); rCorner.Parent = row
+            Instance.new("UICorner", row).CornerRadius = UDim.new(0,6)
             
-            -- WORD LABEL (Left)
             local wordLbl = Instance.new("TextLabel")
-            wordLbl.Size = UDim2.new(0.45, 0, 1, 0)
-            wordLbl.Position = UDim2.new(0, 5, 0, 0)
-            wordLbl.BackgroundTransparency = 1
-            wordLbl.Text = word:upper()
-            wordLbl.TextColor3 = Color3.fromRGB(255, 255, 255)
-            wordLbl.Font = Enum.Font.GothamBold
-            wordLbl.TextSize = 12
-            wordLbl.TextXAlignment = Enum.TextXAlignment.Left
-            wordLbl.Parent = row
+            wordLbl.Size = UDim2.new(0.5, 0, 1, 0); wordLbl.Position = UDim2.new(0,5,0,0); wordLbl.BackgroundTransparency = 1
+            wordLbl.Text = word:upper(); wordLbl.TextColor3 = Color3.new(1,1,1); wordLbl.Font = Enum.Font.GothamBold; wordLbl.TextSize = 11; wordLbl.TextXAlignment = Enum.TextXAlignment.Left; wordLbl.Parent = row
             
-            -- PLAY BUTTON (Green - Middle)
             local playBtn = Instance.new("TextButton")
-            playBtn.Size = UDim2.new(0.25, 0, 0.8, 0)
-            playBtn.Position = UDim2.new(0.45, 0, 0.1, 0)
-            playBtn.BackgroundColor3 = Color3.fromRGB(0, 180, 100)
-            playBtn.Text = "PLAY"
-            playBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-            playBtn.Font = Enum.Font.GothamBlack
-            playBtn.TextSize = 10
-            playBtn.Parent = row
-            local pCorner = Instance.new("UICorner"); pCorner.CornerRadius = UDim.new(0,4); pCorner.Parent = playBtn
+            playBtn.Size = UDim2.new(0.4, 0, 0.8, 0); playBtn.Position = UDim2.new(0.55,0,0.1,0); playBtn.BackgroundColor3 = Color3.fromRGB(0,180,100); playBtn.Text="PLAY"; playBtn.TextColor3=Color3.new(1,1,1); playBtn.Font=Enum.Font.GothamBold; playBtn.TextSize=10; playBtn.Parent=row; Instance.new("UICorner",playBtn).CornerRadius=UDim.new(0,4)
             
-            -- CHAT BUTTON (Blue - Right)
-            local chatBtn = Instance.new("TextButton")
-            chatBtn.Size = UDim2.new(0.25, 0, 0.8, 0)
-            chatBtn.Position = UDim2.new(0.72, 0, 0.1, 0)
-            chatBtn.BackgroundColor3 = Color3.fromRGB(60, 100, 255)
-            chatBtn.Text = "CHAT"
-            chatBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-            chatBtn.Font = Enum.Font.GothamBlack
-            chatBtn.TextSize = 10
-            chatBtn.Parent = row
-            local cCorner = Instance.new("UICorner"); cCorner.CornerRadius = UDim.new(0,4); cCorner.Parent = chatBtn
-            
-            -- PLAY LOGIC (Existing)
             playBtn.MouseButton1Click:Connect(function()
                 task.spawn(function()
                     usedWords[word:lower()] = true
-                    local currentP = getCurrentPrefix()
-                    local suffix = word
-                    if #currentP > 0 and word:lower():sub(1, #currentP) == currentP:lower() then
-                        suffix = word:sub(#currentP + 1)
-                    end
-                    playBtn.Text = "..."
-                    playBtn.BackgroundColor3 = Color3.fromRGB(200, 200, 200)
+                    local suffix = word:sub(#getCurrentPrefix() + 1)
                     if suffix ~= "" then typeWord(suffix) end
-                    task.wait(CONFIG.SubmitDelay)
                     submitWord()
-                    playBtn.BackgroundColor3 = Color3.fromRGB(0, 255, 100) 
-                    playBtn.Text = "DONE"
                 end)
-            end)
-
-            -- CHAT LOGIC (New)
-            chatBtn.MouseButton1Click:Connect(function()
-                chatBtn.Text = "..."
-                sendToPublicChat("Try: " .. word:upper())
-                task.wait(0.5)
-                chatBtn.Text = "SENT"
-                task.wait(0.5)
-                chatBtn.Text = "CHAT"
             end)
         end
     end
 
-    -- UI ELEMENTS
-    local title = Instance.new("TextLabel")
-    title.Size = UDim2.new(1, 0, 0, 30)
-    title.BackgroundTransparency = 1
-    title.Text = "AutoPlay v11 + Counter Mode"
-    title.TextColor3 = Color3.fromRGB(0, 255, 200)
-    title.Font = Enum.Font.GothamBlack
-    title.TextSize = 13
-    title.Parent = frame
-    
-    local toggleBtn = Instance.new("TextButton")
-    toggleBtn.Size = UDim2.new(0.9, 0, 0, 35)
-    toggleBtn.Position = UDim2.new(0.05, 0, 0, 40)
-    toggleBtn.BackgroundColor3 = CONFIG.Enabled and Color3.fromRGB(0, 180, 100) or Color3.fromRGB(180, 60, 60)
-    toggleBtn.Text = CONFIG.Enabled and "STATUS: ACTIVE" or "STATUS: PAUSED"
-    toggleBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-    toggleBtn.Font = Enum.Font.GothamBold
-    toggleBtn.TextSize = 14
-    toggleBtn.Parent = frame
-    local tCorner = Instance.new("UICorner"); tCorner.CornerRadius = UDim.new(0,6); tCorner.Parent = toggleBtn
-    
-    local strategyBtn = Instance.new("TextButton")
-    strategyBtn.Size = UDim2.new(0.9, 0, 0, 35)
-    strategyBtn.Position = UDim2.new(0.05, 0, 0, 85)
-    strategyBtn.BackgroundColor3 = STRATEGY_COLORS[CONFIG.Strategy] or Color3.fromRGB(60,60,80)
-    strategyBtn.Text = "MODE: " .. CONFIG.Strategy:upper()
-    strategyBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-    strategyBtn.Font = Enum.Font.GothamBold
-    strategyBtn.TextSize = 13
-    strategyBtn.Parent = frame
-    local sCorner = Instance.new("UICorner"); sCorner.CornerRadius = UDim.new(0,6); sCorner.Parent = strategyBtn
+    -- [[ UI CONTROLS ]] --
+    -- Helper to create buttons fast
+    local function makeBtn(name, text, color, posY, height)
+        local b = Instance.new("TextButton")
+        b.Name = name; b.Size = UDim2.new(0.9, 0, 0, height); b.Position = UDim2.new(0.05, 0, 0, posY)
+        b.BackgroundColor3 = color; b.Text = text; b.TextColor3 = Color3.new(1,1,1)
+        b.Font = Enum.Font.GothamBold; b.TextSize = 11
+        b.Parent = frame
+        Instance.new("UICorner", b).CornerRadius = UDim.new(0,6)
+        return b
+    end
 
-    local sliderLabel = Instance.new("TextLabel")
-    sliderLabel.Size = UDim2.new(1, 0, 0, 15)
-    sliderLabel.Position = UDim2.new(0, 0, 0, 130)
-    sliderLabel.Text = "Typing Speed: 1.0x"
-    sliderLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
-    sliderLabel.BackgroundTransparency = 1
-    sliderLabel.Font = Enum.Font.GothamBold
-    sliderLabel.TextSize = 11
-    sliderLabel.Parent = frame
+    local title = Instance.new("TextLabel")
+    title.Size = UDim2.new(1, 0, 0, 20); title.BackgroundTransparency = 1; title.Text = "AutoPlay Compact"; title.TextColor3 = Color3.fromRGB(0, 255, 200); title.Font = Enum.Font.GothamBlack; title.TextSize = 12; title.Parent = frame
+
+    local toggleBtn = makeBtn("Toggle", "STATUS: ACTIVE", Color3.fromRGB(0, 180, 100), 25, 25)
+    local strategyBtn = makeBtn("Strat", "MODE: SHORTEST", STRATEGY_COLORS.Shortest, 55, 25)
     
-    local sliderBg = Instance.new("Frame")
-    sliderBg.Size = UDim2.new(0.9, 0, 0, 8)
-    sliderBg.Position = UDim2.new(0.05, 0, 0, 150)
-    sliderBg.BackgroundColor3 = Color3.fromRGB(40, 40, 50)
-    sliderBg.Parent = frame
-    local slCorner = Instance.new("UICorner"); slCorner.CornerRadius = UDim.new(1,0); slCorner.Parent = sliderBg
-    
-    local sliderFill = Instance.new("Frame")
-    sliderFill.Size = UDim2.new(0.2, 0, 1, 0)
-    sliderFill.BackgroundColor3 = Color3.fromRGB(0, 200, 255)
-    sliderFill.Parent = sliderBg
-    local sfCorner = Instance.new("UICorner"); sfCorner.CornerRadius = UDim.new(1,0); sfCorner.Parent = sliderFill
-    
-    local sliderBtn = Instance.new("TextButton")
-    sliderBtn.Size = UDim2.new(1, 0, 1, 0)
-    sliderBtn.BackgroundTransparency = 1
-    sliderBtn.Text = ""
-    sliderBtn.Parent = sliderBg
-    
-    local dragging = false
-    local minSpeed = 0.5
-    local maxSpeed = 5.0
-    
-    sliderBtn.MouseButton1Down:Connect(function() dragging = true end)
-    UserInputService.InputEnded:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 then dragging = false end
-    end)
-    
-    UserInputService.InputChanged:Connect(function(input)
-        if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
-            local mousePos = UserInputService:GetMouseLocation().X
-            local framePos = sliderBg.AbsolutePosition.X
-            local frameSize = sliderBg.AbsoluteSize.X
-            local relativePos = math.clamp((mousePos - framePos) / frameSize, 0, 1)
-            
-            sliderFill.Size = UDim2.new(relativePos, 0, 1, 0)
-            local newSpeed = minSpeed + (relativePos * (maxSpeed - minSpeed))
-            newSpeed = math.floor(newSpeed * 10) / 10 
-            
-            CONFIG.SpeedMultiplier = newSpeed
-            sliderLabel.Text = "Typing Speed: " .. newSpeed .. "x"
-        end
-    end)
+    -- Speed Slider (Mini)
+    local sliderBg = Instance.new("Frame"); sliderBg.Size = UDim2.new(0.9,0,0,25); sliderBg.Position = UDim2.new(0.05,0,0,85); sliderBg.BackgroundColor3=Color3.fromRGB(40,40,50); sliderBg.Parent=frame; Instance.new("UICorner",sliderBg).CornerRadius=UDim.new(0,6)
+    local sliderFill = Instance.new("Frame"); sliderFill.Size = UDim2.new(0.2,0,1,0); sliderFill.BackgroundColor3=Color3.fromRGB(0,200,255); sliderFill.Parent=sliderBg; Instance.new("UICorner",sliderFill).CornerRadius=UDim.new(0,6)
+    local sliderTxt = Instance.new("TextLabel"); sliderTxt.Size=UDim2.new(1,0,1,0); sliderTxt.BackgroundTransparency=1; sliderTxt.Text="Speed: 1.0x"; sliderTxt.TextColor3=Color3.new(1,1,1); sliderTxt.Font=Enum.Font.GothamBold; sliderTxt.TextSize=11; sliderTxt.Parent=sliderBg
+    local sliderBtn = Instance.new("TextButton"); sliderBtn.Size=UDim2.new(1,0,1,0); sliderBtn.BackgroundTransparency=1; sliderBtn.Text=""; sliderBtn.Parent=sliderBg
 
     local targetBox = Instance.new("TextBox")
-    targetBox.Size = UDim2.new(0.9, 0, 0, 30)
-    targetBox.Position = UDim2.new(0.05, 0, 0, 190)
-    targetBox.BackgroundColor3 = Color3.fromRGB(40, 40, 50)
-    targetBox.Text = ""
-    targetBox.PlaceholderText = "Target Letter (e.g. X)"
-    targetBox.TextColor3 = Color3.fromRGB(255, 255, 255)
-    targetBox.Font = Enum.Font.Gotham
-    targetBox.TextSize = 12
-    targetBox.Parent = frame
-    local tbCorner = Instance.new("UICorner"); tbCorner.CornerRadius = UDim.new(0,6); tbCorner.Parent = targetBox
+    targetBox.Size = UDim2.new(0.9, 0, 0, 25); targetBox.Position = UDim2.new(0.05, 0, 0, 115); targetBox.BackgroundColor3 = Color3.fromRGB(40,40,50); targetBox.Text = ""; targetBox.PlaceholderText = "Target Letter"; targetBox.TextColor3 = Color3.new(1,1,1); targetBox.Font = Enum.Font.Gotham; targetBox.TextSize = 11; targetBox.Parent = frame; Instance.new("UICorner",targetBox).CornerRadius = UDim.new(0,6)
 
-    -- // NEW SHORT TIMER BUTTON \\ --
-    local timerBtn = Instance.new("TextButton")
-    timerBtn.Size = UDim2.new(0.9, 0, 0, 30)
-    timerBtn.Position = UDim2.new(0.05, 0, 0, 230)
-    timerBtn.BackgroundColor3 = Color3.fromRGB(0, 150, 255)
-    timerBtn.Text = "TIMER: NORMAL (15s)"
-    timerBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-    timerBtn.Font = Enum.Font.GothamBold
-    timerBtn.TextSize = 12
-    timerBtn.Parent = frame
-    local timerCorner = Instance.new("UICorner"); timerCorner.CornerRadius = UDim.new(0,6); timerCorner.Parent = timerBtn
-
-    -- RESET BUTTON (Moved Down)
-    local resetBtn = Instance.new("TextButton")
-    resetBtn.Size = UDim2.new(0.9, 0, 0, 30)
-    resetBtn.Position = UDim2.new(0.05, 0, 0, 270)
-    resetBtn.BackgroundColor3 = Color3.fromRGB(80, 50, 50)
-    resetBtn.Text = "RESET MEMORY"
-    resetBtn.TextColor3 = Color3.fromRGB(255, 200, 200)
-    resetBtn.Font = Enum.Font.GothamBold
-    resetBtn.TextSize = 12
-    resetBtn.Parent = frame
-    local rCorner = Instance.new("UICorner"); rCorner.CornerRadius = UDim.new(0,6); rCorner.Parent = resetBtn
+    -- TIMER BUTTON
+    local timerBtn = makeBtn("Timer", "TIMER: NORMAL (15s)", Color3.fromRGB(0, 150, 255), 145, 25)
+    local resetBtn = makeBtn("Reset", "RESET WORDS", Color3.fromRGB(80, 50, 50), 175, 25)
     
     local statusLabel = Instance.new("TextLabel")
-    statusLabel.Size = UDim2.new(1, 0, 0, 20)
-    statusLabel.Position = UDim2.new(0, 0, 0, 315)
-    statusLabel.BackgroundTransparency = 1
-    statusLabel.Text = "Waiting..."
-    statusLabel.TextColor3 = Color3.fromRGB(120, 120, 120)
-    statusLabel.Font = Enum.Font.Gotham
-    statusLabel.TextSize = 11
-    statusLabel.Parent = frame
+    statusLabel.Size = UDim2.new(1, 0, 0, 15); statusLabel.Position = UDim2.new(0, 0, 0, 205); statusLabel.BackgroundTransparency = 1; statusLabel.Text = "Waiting..."; statusLabel.TextColor3 = Color3.fromRGB(150, 150, 150); statusLabel.Font = Enum.Font.Gotham; statusLabel.TextSize = 10; statusLabel.Parent = frame
 
-    -- EVENTS
+    -- [[ EVENTS ]] --
     toggleBtn.MouseButton1Click:Connect(function()
         CONFIG.Enabled = not CONFIG.Enabled
         toggleBtn.BackgroundColor3 = CONFIG.Enabled and Color3.fromRGB(0, 180, 100) or Color3.fromRGB(180, 60, 60)
         toggleBtn.Text = CONFIG.Enabled and "STATUS: ACTIVE" or "STATUS: PAUSED"
     end)
-    
+
     local strategies = {"Shortest", "Longest", "Target", "Random"}
     local sIndex = 1
     strategyBtn.MouseButton1Click:Connect(function()
-        sIndex = sIndex + 1
-        if sIndex > #strategies then sIndex = 1 end
+        sIndex = sIndex + 1; if sIndex > #strategies then sIndex = 1 end
         CONFIG.Strategy = strategies[sIndex]
         strategyBtn.Text = "MODE: " .. CONFIG.Strategy:upper()
-        
-        -- UPDATE COLOR HERE
-        if STRATEGY_COLORS[CONFIG.Strategy] then
-            strategyBtn.BackgroundColor3 = STRATEGY_COLORS[CONFIG.Strategy]
-        end
+        if STRATEGY_COLORS[CONFIG.Strategy] then strategyBtn.BackgroundColor3 = STRATEGY_COLORS[CONFIG.Strategy] end
     end)
     
     targetBox:GetPropertyChangedSignal("Text"):Connect(function()
         if #targetBox.Text > 1 then targetBox.Text = targetBox.Text:sub(1,1) end
         CONFIG.TargetEnding = targetBox.Text
     end)
-    
-    -- // TIMER BUTTON LOGIC \\ --
+
+    -- SLIDER LOGIC
+    local dragging = false
+    sliderBtn.MouseButton1Down:Connect(function() dragging = true end)
+    UserInputService.InputEnded:Connect(function(input) if input.UserInputType == Enum.UserInputType.MouseButton1 then dragging = false end end)
+    UserInputService.InputChanged:Connect(function(input)
+        if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
+            local relativePos = math.clamp((UserInputService:GetMouseLocation().X - sliderBg.AbsolutePosition.X) / sliderBg.AbsoluteSize.X, 0, 1)
+            sliderFill.Size = UDim2.new(relativePos, 0, 1, 0)
+            CONFIG.SpeedMultiplier = math.floor((0.5 + (relativePos * 4.5)) * 10) / 10
+            sliderTxt.Text = "Speed: " .. CONFIG.SpeedMultiplier .. "x"
+        end
+    end)
+
+    -- TIMER / FAST MODE LOGIC
     local isShortMode = false
     timerBtn.MouseButton1Click:Connect(function()
         isShortMode = not isShortMode
         if isShortMode then
+            -- GOD MODE ACTIVATED
             CONFIG.RoundDuration = 5
-            CONFIG.PanicThreshold = 2.5 -- Panic halfway through
-            CONFIG.SafeModeThreshold = 3
-            timerBtn.Text = "TIMER: SHORT (5s)"
-            timerBtn.BackgroundColor3 = Color3.fromRGB(255, 140, 0) -- Orange warning color
+            CONFIG.ReactionMin = 0; CONFIG.ReactionMax = 0 -- NO DELAY
+            CONFIG.SubmitDelay = 0
+            timerBtn.Text = "TIMER: SHORT (INSTANT)"
+            timerBtn.BackgroundColor3 = Color3.fromRGB(255, 140, 0)
         else
             CONFIG.RoundDuration = 15
-            CONFIG.PanicThreshold = 4
-            CONFIG.SafeModeThreshold = 6
+            CONFIG.ReactionMin = 0.4; CONFIG.ReactionMax = 0.8
+            CONFIG.SubmitDelay = 0.05
             timerBtn.Text = "TIMER: NORMAL (15s)"
-            timerBtn.BackgroundColor3 = Color3.fromRGB(0, 150, 255) -- Blue normal color
+            timerBtn.BackgroundColor3 = Color3.fromRGB(0, 150, 255)
         end
     end)
 
-    resetBtn.MouseButton1Click:Connect(function()
-        usedWords = {}
-        resetBtn.Text = "CLEARED!"
-        task.wait(1)
-        resetBtn.Text = "RESET MEMORY"
-    end)
-
-    -- Toggle Logic: Left OR Right Shift
-    UserInputService.InputBegan:Connect(function(input)
-        if input.KeyCode == Enum.KeyCode.RightShift or input.KeyCode == Enum.KeyCode.LeftShift then
-            frame.Visible = not frame.Visible
-        end
-    end)
+    resetBtn.MouseButton1Click:Connect(function() usedWords = {}; resetBtn.Text = "CLEARED!"; task.wait(1); resetBtn.Text = "RESET WORDS" end)
     
-    -- Status Loop Update
+    -- STATUS LOOP
     task.spawn(function()
         while task.wait(0.2) do
             if screenGui.Parent and isOurTurn() then
@@ -682,48 +471,43 @@ local function createUltimateUI()
             end
         end
     end)
+    
+    -- Collapse Toggle
+    UserInputService.InputBegan:Connect(function(input)
+        if input.KeyCode == Enum.KeyCode.RightShift then frame.Visible = not frame.Visible end
+    end)
 end
 
--- // MAIN LOGIC LOOPS \\ --
-
+-- // MAIN LOOPS \\ --
 local lastTurnState = false
 local lastKnownPrefix = ""
 
--- 1. Game State Monitor (Always runs, updates UI)
+-- Game State Monitor
 task.spawn(function()
     while task.wait(0.1) do
         local myTurn = isOurTurn()
         local prefix = getCurrentPrefix()
-        
         if myTurn and not lastTurnState then
-            TurnStartTime = tick()
-            task.wait(0.1)
-            if prefix == "" then
+            TurnStartTime = tick(); task.wait(0.05)
+            if prefix == "" then 
                 local req = getRequiredLetterLabel()
                 if req then prefix = req end
             end
             currentTurnBase = prefix
         end
-        
-        if prefix == "" and currentTurnBase ~= "" and myTurn then
-            prefix = currentTurnBase
-        end
-
+        if prefix == "" and currentTurnBase ~= "" and myTurn then prefix = currentTurnBase end
         if prefix ~= lastKnownPrefix or myTurn ~= lastTurnState then
-            if updateSuggestions then
-                updateSuggestions(prefix)
-            end
+            if updateSuggestions then updateSuggestions(prefix) end
             lastKnownPrefix = prefix
         end
-        
         lastTurnState = myTurn
         scanForUsedWords()
     end
 end)
 
--- 2. AutoPlay Bot Logic
+-- AutoPlay Bot Logic
 task.spawn(function()
-    while task.wait(0.1) do
+    while task.wait() do -- Runs faster
         if CONFIG.Enabled and isOurTurn() and not isProcessing then
             isProcessing = true
             local prefix = getCurrentPrefix()
@@ -732,14 +516,17 @@ task.spawn(function()
             if prefix ~= "" then
                 local fullWord = getValidWord(prefix)
                 if fullWord then
-                    task.wait(randomFloat(CONFIG.ReactionMin, CONFIG.ReactionMax))
+                    -- Reaction Wait (Skipped if Short Mode)
+                    if CONFIG.RoundDuration ~= 5 then 
+                        task.wait(randomFloat(CONFIG.ReactionMin, CONFIG.ReactionMax))
+                    end
+                    
                     if isOurTurn() then
                         local suffix = fullWord:sub(#prefix + 1)
                         if suffix ~= "" then typeWord(suffix) end
-                        task.wait(CONFIG.SubmitDelay)
                         submitWord()
                         usedWords[fullWord:lower()] = true
-                        task.wait(CONFIG.VerificationDelay)
+                        if CONFIG.RoundDuration ~= 5 then task.wait(CONFIG.VerificationDelay) end
                     end
                 end
             end
@@ -749,4 +536,4 @@ task.spawn(function()
 end)
 
 createUltimateUI()
-print(" [Ultimate] Loaded with SHORT TIMER (Counter Mode) button.")
+print(" [Ultimate] Compact UI + Instant Short Mode Loaded.")
