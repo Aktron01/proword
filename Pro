@@ -1,3 +1,8 @@
+-- [[ 1. KILL SWITCH (Prevents Double Typing) ]] --
+getgenv().UltimateAutoPlayRunning = false
+task.wait(0.1) -- Give time for old loops to die
+getgenv().UltimateAutoPlayRunning = true
+
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local UserInputService = game:GetService("UserInputService")
@@ -104,6 +109,8 @@ local function typeLetter(letter)
     local keyCode = Enum.KeyCode[string.upper(letter)]
     if keyCode then
         VirtualInputManager:SendKeyEvent(true, keyCode, false, game)
+        -- Added tiny wait to ensure game registers Down/Up separately
+        task.wait() 
         VirtualInputManager:SendKeyEvent(false, keyCode, false, game)
     end
 end
@@ -111,12 +118,11 @@ end
 local function typeWord(word)
     local len = #word
     
-    -- [[ INSTANT TYPING FOR FAST MODE ]] --
+    -- [[ FAST MODE (0.2s Delay) ]] --
     if CONFIG.RoundDuration == 5 then
-        -- Absolutely NO delays between letters
         for i = 1, len do
             typeLetter(string.sub(word, i, i))
-task.wait(0.2)
+            task.wait(0.2) -- YOU REQUESTED 0.2 HERE
         end
         return
     end
@@ -131,6 +137,8 @@ task.wait(0.2)
     local avgDelay = targetDuration / len
     
     for i = 1, len do
+        if not getgenv().UltimateAutoPlayRunning then break end -- Kill Switch Check
+        
         local timeLeft = 10 
         if TurnStartTime > 0 then timeLeft = CONFIG.RoundDuration - (tick() - TurnStartTime) end
         
@@ -151,18 +159,17 @@ end
 
 local function submitWord()
     VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.Return, false, game)
-    -- In Fast Mode (5s), we remove the small wait for Enter key
     if CONFIG.RoundDuration ~= 5 then task.wait(0.02) end
     VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.Return, false, game)
 end
 
 -- [[ SMART DELETION ]] --
--- This function deletes exactly N characters
 local function smartDelete(amount)
     for i = 1, amount do
         VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.Backspace, false, game)
+        task.wait()
         VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.Backspace, false, game)
-        if CONFIG.RoundDuration ~= 5 then task.wait(0.02) end -- Tiny delay for human mode, instant for fast
+        task.wait(0.05) 
     end
 end
 
@@ -444,7 +451,7 @@ local function createUltimateUI()
             CONFIG.RoundDuration = 5
             CONFIG.ReactionMin = 0.5; CONFIG.ReactionMax = 0.5 
             CONFIG.SubmitDelay = 0
-            timerBtn.Text = "TIMER: FAST (0.5s Delay)"
+            timerBtn.Text = "TIMER: FAST (0.2s Delay)"
             timerBtn.BackgroundColor3 = Color3.fromRGB(255, 140, 0)
         else
             CONFIG.RoundDuration = 15
@@ -459,6 +466,7 @@ local function createUltimateUI()
     
     task.spawn(function()
         while task.wait(0.2) do
+            if not getgenv().UltimateAutoPlayRunning then break end
             if screenGui.Parent and isOurTurn() then
                 local timeLeft = CONFIG.RoundDuration - (tick() - TurnStartTime)
                 statusLabel.Text = "YOUR TURN: " .. math.floor(timeLeft) .. "s"
@@ -483,6 +491,8 @@ local lastKnownPrefix = ""
 
 task.spawn(function()
     while task.wait(0.1) do
+        if not getgenv().UltimateAutoPlayRunning then break end
+        
         local myTurn = isOurTurn()
         local prefix = getCurrentPrefix()
         if myTurn and not lastTurnState then
@@ -505,6 +515,8 @@ end)
 
 task.spawn(function()
     while task.wait() do
+        if not getgenv().UltimateAutoPlayRunning then break end
+
         if CONFIG.Enabled and isOurTurn() and not isProcessing then
             isProcessing = true
             local prefix = getCurrentPrefix()
@@ -513,34 +525,31 @@ task.spawn(function()
             if prefix ~= "" then
                 local fullWord = getValidWord(prefix)
                 if fullWord then
-                    -- 1. Reaction Delay (Thinking Time)
+                    -- 1. Reaction Delay
                     if CONFIG.RoundDuration ~= 5 then 
                         task.wait(randomFloat(CONFIG.ReactionMin, CONFIG.ReactionMax))
                     else
-                        task.wait(0.5) -- Forced 0.5s start delay for fast mode
+                        task.wait(0.5) -- Fast Mode wait
                     end
                     
                     if isOurTurn() then
                         -- 2. Type and Submit
                         local suffix = fullWord:sub(#prefix + 1)
-                        local lettersTyped = #suffix -- Remember how many letters we typed
+                        local lettersTyped = #suffix 
                         
                         if suffix ~= "" then typeWord(suffix) end
                         submitWord()
-                        
-                        -- Mark used immediately
                         usedWords[fullWord:lower()] = true
                         
-                        -- 3. FAIL SAFE (Smart Delete)
-                        if CONFIG.RoundDuration == 5 then
-                            task.wait(0.1) 
-                            if isOurTurn() then
-                                -- If it is STILL our turn, the word failed.
-                                -- Delete exactly what we typed.
-                                smartDelete(lettersTyped)
-                            end
+                        -- 3. UNIVERSAL FAIL SAFE (For Normal & Fast Mode)
+                        task.wait(0.2) -- Wait to see if turn ended
+                        if isOurTurn() then
+                            -- Loop hasn't broken, so word was bad!
+                            -- Backspace exactly what we added
+                            smartDelete(lettersTyped)
                         else
-                            task.wait(CONFIG.VerificationDelay)
+                            -- Turn ended successfully, wait before next
+                            if CONFIG.RoundDuration ~= 5 then task.wait(CONFIG.VerificationDelay) end
                         end
                     end
                 end
@@ -551,4 +560,4 @@ task.spawn(function()
 end)
 
 createUltimateUI()
-print(" [Ultimate] Fixed: Smart Backspace & Instant Fast Mode.")
+print(" [Ultimate] Fixed: Anti-Duplicate & Universal FailSafe.")
