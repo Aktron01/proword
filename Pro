@@ -21,7 +21,7 @@ local CONFIG = {
     MinWordLength = 3, 
     MaxWordLength = 35,
     
-    -- ROUND SETTINGS
+    -- ROUND SETTINGS (Dynamic)
     RoundDuration = 15,
     PanicThreshold = 4,   
     SafeModeThreshold = 6, 
@@ -339,8 +339,9 @@ local function createUltimateUI()
     
     -- MAIN FRAME
     local frame = Instance.new("Frame")
-    frame.Size = UDim2.new(0, 240, 0, 320) 
-    frame.Position = UDim2.new(0, 20, 0.5, -160)
+    -- INCREASED HEIGHT TO FIT NEW BUTTON
+    frame.Size = UDim2.new(0, 240, 0, 360) 
+    frame.Position = UDim2.new(0, 20, 0.5, -180)
     frame.BackgroundColor3 = Color3.fromRGB(20, 20, 25)
     frame.BorderSizePixel = 0
     frame.Active = true
@@ -481,7 +482,7 @@ local function createUltimateUI()
     local title = Instance.new("TextLabel")
     title.Size = UDim2.new(1, 0, 0, 30)
     title.BackgroundTransparency = 1
-    title.Text = "AutoPlay v10 + Chat Assist"
+    title.Text = "AutoPlay v11 + Counter Mode"
     title.TextColor3 = Color3.fromRGB(0, 255, 200)
     title.Font = Enum.Font.GothamBlack
     title.TextSize = 13
@@ -575,9 +576,22 @@ local function createUltimateUI()
     targetBox.Parent = frame
     local tbCorner = Instance.new("UICorner"); tbCorner.CornerRadius = UDim.new(0,6); tbCorner.Parent = targetBox
 
+    -- // NEW SHORT TIMER BUTTON \\ --
+    local timerBtn = Instance.new("TextButton")
+    timerBtn.Size = UDim2.new(0.9, 0, 0, 30)
+    timerBtn.Position = UDim2.new(0.05, 0, 0, 230)
+    timerBtn.BackgroundColor3 = Color3.fromRGB(0, 150, 255)
+    timerBtn.Text = "TIMER: NORMAL (15s)"
+    timerBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    timerBtn.Font = Enum.Font.GothamBold
+    timerBtn.TextSize = 12
+    timerBtn.Parent = frame
+    local timerCorner = Instance.new("UICorner"); timerCorner.CornerRadius = UDim.new(0,6); timerCorner.Parent = timerBtn
+
+    -- RESET BUTTON (Moved Down)
     local resetBtn = Instance.new("TextButton")
     resetBtn.Size = UDim2.new(0.9, 0, 0, 30)
-    resetBtn.Position = UDim2.new(0.05, 0, 0, 230)
+    resetBtn.Position = UDim2.new(0.05, 0, 0, 270)
     resetBtn.BackgroundColor3 = Color3.fromRGB(80, 50, 50)
     resetBtn.Text = "RESET MEMORY"
     resetBtn.TextColor3 = Color3.fromRGB(255, 200, 200)
@@ -588,7 +602,7 @@ local function createUltimateUI()
     
     local statusLabel = Instance.new("TextLabel")
     statusLabel.Size = UDim2.new(1, 0, 0, 20)
-    statusLabel.Position = UDim2.new(0, 0, 0, 275)
+    statusLabel.Position = UDim2.new(0, 0, 0, 315)
     statusLabel.BackgroundTransparency = 1
     statusLabel.Text = "Waiting..."
     statusLabel.TextColor3 = Color3.fromRGB(120, 120, 120)
@@ -622,6 +636,25 @@ local function createUltimateUI()
         CONFIG.TargetEnding = targetBox.Text
     end)
     
+    -- // TIMER BUTTON LOGIC \\ --
+    local isShortMode = false
+    timerBtn.MouseButton1Click:Connect(function()
+        isShortMode = not isShortMode
+        if isShortMode then
+            CONFIG.RoundDuration = 5
+            CONFIG.PanicThreshold = 2.5 -- Panic halfway through
+            CONFIG.SafeModeThreshold = 3
+            timerBtn.Text = "TIMER: SHORT (5s)"
+            timerBtn.BackgroundColor3 = Color3.fromRGB(255, 140, 0) -- Orange warning color
+        else
+            CONFIG.RoundDuration = 15
+            CONFIG.PanicThreshold = 4
+            CONFIG.SafeModeThreshold = 6
+            timerBtn.Text = "TIMER: NORMAL (15s)"
+            timerBtn.BackgroundColor3 = Color3.fromRGB(0, 150, 255) -- Blue normal color
+        end
+    end)
+
     resetBtn.MouseButton1Click:Connect(function()
         usedWords = {}
         resetBtn.Text = "CLEARED!"
@@ -716,4 +749,4 @@ task.spawn(function()
 end)
 
 createUltimateUI()
-print(" [Ultimate] Loaded with PLAY and CHAT buttons (GitHub URL Updated).")
+print(" [Ultimate] Loaded with SHORT TIMER (Counter Mode) button.")
