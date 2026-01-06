@@ -629,9 +629,9 @@ local function createUltimateUI()
         resetBtn.Text = "RESET MEMORY"
     end)
 
-    -- Toggle Logic: Left OR Right Control
+    -- Toggle Logic: Left OR Right Shift
     UserInputService.InputBegan:Connect(function(input)
-        if input.KeyCode == Enum.KeyCode.RightControl or input.KeyCode == Enum.KeyCode.LeftControl then
+        if input.KeyCode == Enum.KeyCode.RightShift or input.KeyCode == Enum.KeyCode.LeftShift then
             frame.Visible = not frame.Visible
         end
     end)
