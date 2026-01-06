@@ -454,7 +454,7 @@ local function createUltimateUI()
         isShortMode = not isShortMode
         if isShortMode then
             CONFIG.RoundDuration = 5
-            CONFIG.ReactionMin = 0; CONFIG.ReactionMax = 0
+            CONFIG.ReactionMin = 0.5; CONFIG.ReactionMax = 0.5 -- 0.5s DELAY ADDED HERE
             CONFIG.SubmitDelay = 0
             timerBtn.Text = "TIMER: FAST (0-1.5s)"
             timerBtn.BackgroundColor3 = Color3.fromRGB(255, 140, 0)
@@ -527,8 +527,11 @@ task.spawn(function()
                 local fullWord = getValidWord(prefix)
                 if fullWord then
                     -- Normal wait only if NOT in Short/God Mode
+                    -- If Short Mode, it now waits the 0.5s ReactionMin we set above
                     if CONFIG.RoundDuration ~= 5 then 
                         task.wait(randomFloat(CONFIG.ReactionMin, CONFIG.ReactionMax))
+                    else
+                        task.wait(0.5) -- Force wait 0.5s for Short Mode
                     end
                     
                     if isOurTurn() then
@@ -555,4 +558,4 @@ task.spawn(function()
 end)
 
 createUltimateUI()
-print(" [Ultimate] Final Version (Restored Chat/LeftShift + New Features).")
+print(" [Ultimate] Final Version (0.5s Delay).")
