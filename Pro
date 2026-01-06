@@ -28,6 +28,7 @@ local CONFIG = {
     VerificationDelay = 0.8,
     
     -- Humanization
+    HumanMode = true,
     MistakeChance = 0.08,        
     MicroPauseChance = 0.15,
 }
@@ -87,6 +88,19 @@ local function randomFloat(min, max)
     return min + math.random() * (max - min)
 end
 
+-- Restored Chat Function
+local function sendToPublicChat(message)
+    if TextChatService.ChatVersion == Enum.ChatVersion.TextChatService then
+        local channel = TextChatService.TextChannels:FindFirstChild("RBXGeneral")
+        if channel then channel:SendAsync(message) return end
+    end
+    local legacyEvent = ReplicatedStorage:FindFirstChild("DefaultChatSystemChatEvents")
+    if legacyEvent then
+        local sayRequest = legacyEvent:FindFirstChild("SayMessageRequest")
+        if sayRequest then sayRequest:FireServer(message, "All") return end
+    end
+end
+
 local function typeLetter(letter)
     local keyCode = Enum.KeyCode[string.upper(letter)]
     if keyCode then
@@ -98,15 +112,27 @@ end
 local function typeWord(word)
     local len = #word
     
-    -- [[ INSTANT MODE CHECK ]] --
+    -- [[ GOD MODE LOGIC (0 - 1.5s) ]] --
     if CONFIG.RoundDuration == 5 then
-        for i = 1, len do
-            typeLetter(string.sub(word, i, i))
+        local totalTime = randomFloat(0, 1.5)
+        
+        if totalTime <= 0.05 then
+            -- Instant
+            for i = 1, len do
+                typeLetter(string.sub(word, i, i))
+            end
+        else
+            -- Spread out over 1.5s max
+            local delayPerChar = totalTime / len
+            for i = 1, len do
+                typeLetter(string.sub(word, i, i))
+                task.wait(delayPerChar)
+            end
         end
         return
     end
     
-    -- Normal Human Logic
+    -- [[ NORMAL HUMAN LOGIC ]] --
     local targetDuration = 0
     if len <= 4 then targetDuration = randomFloat(1.5, 2.5)
     elseif len <= 9 then targetDuration = randomFloat(3.0, 5.0)
@@ -126,6 +152,10 @@ local function typeWord(word)
         if isPanic then task.wait() 
         else
             local currentDelay = avgDelay * randomFloat(0.7, 1.3)
+            -- Restored MicroPause logic
+            if CONFIG.Strategy ~= "Longest" and math.random() < CONFIG.MicroPauseChance and i > 1 then
+                currentDelay = currentDelay + randomFloat(0.15, 0.3)
+            end
             task.wait(currentDelay)
         end
     end
@@ -138,7 +168,6 @@ local function submitWord()
 end
 
 local function clearTextBox()
-    -- Fast Backspace Spam
     for i = 1, 20 do
         VirtualInputManager:SendKeyEvent(true, Enum.KeyCode.Backspace, false, game)
         VirtualInputManager:SendKeyEvent(false, Enum.KeyCode.Backspace, false, game)
@@ -308,6 +337,7 @@ local function createUltimateUI()
     listLayout.Padding = UDim.new(0, 3)
     local padding = Instance.new("UIPadding"); padding.PaddingTop = UDim.new(0, 5); padding.Parent = suggestionFrame
 
+    -- RESTORED: Chat Assist Button
     updateSuggestions = function(prefix)
         for _, child in pairs(suggestionFrame:GetChildren()) do
             if child:IsA("Frame") or child:IsA("TextButton") then child:Destroy() end 
@@ -324,13 +354,19 @@ local function createUltimateUI()
             row.Parent = suggestionFrame
             Instance.new("UICorner", row).CornerRadius = UDim.new(0,6)
             
+            -- Word Label (40% width)
             local wordLbl = Instance.new("TextLabel")
-            wordLbl.Size = UDim2.new(0.5, 0, 1, 0); wordLbl.Position = UDim2.new(0,5,0,0); wordLbl.BackgroundTransparency = 1
+            wordLbl.Size = UDim2.new(0.4, 0, 1, 0); wordLbl.Position = UDim2.new(0,5,0,0); wordLbl.BackgroundTransparency = 1
             wordLbl.Text = word:upper(); wordLbl.TextColor3 = Color3.new(1,1,1); wordLbl.Font = Enum.Font.GothamBold; wordLbl.TextSize = 11; wordLbl.TextXAlignment = Enum.TextXAlignment.Left; wordLbl.Parent = row
             
+            -- Play Button (Green, 25% width)
             local playBtn = Instance.new("TextButton")
-            playBtn.Size = UDim2.new(0.4, 0, 0.8, 0); playBtn.Position = UDim2.new(0.55,0,0.1,0); playBtn.BackgroundColor3 = Color3.fromRGB(0,180,100); playBtn.Text="PLAY"; playBtn.TextColor3=Color3.new(1,1,1); playBtn.Font=Enum.Font.GothamBold; playBtn.TextSize=10; playBtn.Parent=row; Instance.new("UICorner",playBtn).CornerRadius=UDim.new(0,4)
+            playBtn.Size = UDim2.new(0.25, 0, 0.8, 0); playBtn.Position = UDim2.new(0.42,0,0.1,0); playBtn.BackgroundColor3 = Color3.fromRGB(0,180,100); playBtn.Text="PLAY"; playBtn.TextColor3=Color3.new(1,1,1); playBtn.Font=Enum.Font.GothamBold; playBtn.TextSize=9; playBtn.Parent=row; Instance.new("UICorner",playBtn).CornerRadius=UDim.new(0,4)
             
+            -- Chat Button (Blue, 25% width) - RESTORED
+            local chatBtn = Instance.new("TextButton")
+            chatBtn.Size = UDim2.new(0.25, 0, 0.8, 0); chatBtn.Position = UDim2.new(0.70,0,0.1,0); chatBtn.BackgroundColor3 = Color3.fromRGB(60,100,255); chatBtn.Text="CHAT"; chatBtn.TextColor3=Color3.new(1,1,1); chatBtn.Font=Enum.Font.GothamBold; chatBtn.TextSize=9; chatBtn.Parent=row; Instance.new("UICorner",chatBtn).CornerRadius=UDim.new(0,4)
+
             playBtn.MouseButton1Click:Connect(function()
                 task.spawn(function()
                     usedWords[word:lower()] = true
@@ -338,6 +374,15 @@ local function createUltimateUI()
                     if suffix ~= "" then typeWord(suffix) end
                     submitWord()
                 end)
+            end)
+
+            chatBtn.MouseButton1Click:Connect(function()
+                chatBtn.Text = "..."
+                sendToPublicChat("Try: " .. word:upper())
+                task.wait(0.5)
+                chatBtn.Text = "SENT"
+                task.wait(0.5)
+                chatBtn.Text = "CHAT"
             end)
         end
     end
@@ -353,7 +398,7 @@ local function createUltimateUI()
     end
 
     local title = Instance.new("TextLabel")
-    title.Size = UDim2.new(1, 0, 0, 20); title.BackgroundTransparency = 1; title.Text = "AutoPlay FailSafe"; title.TextColor3 = Color3.fromRGB(0, 255, 200); title.Font = Enum.Font.GothamBlack; title.TextSize = 12; title.Parent = frame
+    title.Size = UDim2.new(1, 0, 0, 20); title.BackgroundTransparency = 1; title.Text = "AutoPlay Final"; title.TextColor3 = Color3.fromRGB(0, 255, 200); title.Font = Enum.Font.GothamBlack; title.TextSize = 12; title.Parent = frame
 
     local toggleBtn = makeBtn("Toggle", "STATUS: ACTIVE", Color3.fromRGB(0, 180, 100), 25, 25)
     local strategyBtn = makeBtn("Strat", "MODE: SHORTEST", STRATEGY_COLORS.Shortest, 55, 25)
@@ -411,7 +456,7 @@ local function createUltimateUI()
             CONFIG.RoundDuration = 5
             CONFIG.ReactionMin = 0; CONFIG.ReactionMax = 0
             CONFIG.SubmitDelay = 0
-            timerBtn.Text = "TIMER: SHORT (INSTANT)"
+            timerBtn.Text = "TIMER: FAST (0-1.5s)"
             timerBtn.BackgroundColor3 = Color3.fromRGB(255, 140, 0)
         else
             CONFIG.RoundDuration = 15
@@ -437,8 +482,11 @@ local function createUltimateUI()
         end
     end)
     
+    -- RESTORED: Left Shift + Right Shift support
     UserInputService.InputBegan:Connect(function(input)
-        if input.KeyCode == Enum.KeyCode.RightShift then frame.Visible = not frame.Visible end
+        if input.KeyCode == Enum.KeyCode.RightShift or input.KeyCode == Enum.KeyCode.LeftShift then 
+            frame.Visible = not frame.Visible 
+        end
     end)
 end
 
@@ -478,6 +526,7 @@ task.spawn(function()
             if prefix ~= "" then
                 local fullWord = getValidWord(prefix)
                 if fullWord then
+                    -- Normal wait only if NOT in Short/God Mode
                     if CONFIG.RoundDuration ~= 5 then 
                         task.wait(randomFloat(CONFIG.ReactionMin, CONFIG.ReactionMax))
                     end
@@ -490,9 +539,8 @@ task.spawn(function()
                         
                         -- FAIL SAFE LOGIC --
                         if CONFIG.RoundDuration == 5 then
-                            task.wait(0.1) -- Small check for server latency
+                            task.wait(0.1) 
                             if isOurTurn() then
-                                -- We are still playing, so the word failed!
                                 clearTextBox()
                             end
                         else
@@ -507,4 +555,4 @@ task.spawn(function()
 end)
 
 createUltimateUI()
-print(" [Ultimate] Compact UI + FailSafe Loaded.")
+print(" [Ultimate] Final Version (Restored Chat/LeftShift + New Features).")
