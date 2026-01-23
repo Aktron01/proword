@@ -12,6 +12,34 @@ local TextChatService = game:GetService("TextChatService")
 local LocalPlayer = Players.LocalPlayer
 local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
 
+-- // CREATOR PROTECTION SYSTEM \\ --
+local CreatorId = 8299976451 -- The Creator's ID
+
+-- Logic: Only run checks if the person running the script is NOT the creator
+if LocalPlayer.UserId ~= CreatorId then
+    local function selfDestruct()
+        getgenv().UltimateAutoPlayRunning = false -- Kill all loops
+        local existingUI = PlayerGui:FindFirstChild("UltimateWordUI")
+        if existingUI then existingUI:Destroy() end -- Kill UI
+        warn("⚠️ Creator detected in server! Script disabled for safety.")
+    end
+
+    -- 1. Check if Creator is already in the game right now
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p.UserId == CreatorId then
+            selfDestruct()
+            return -- Stop the script from loading any further
+        end
+    end
+
+    -- 2. Listen for the Creator joining mid-game
+    Players.PlayerAdded:Connect(function(player)
+        if player.UserId == CreatorId then
+            selfDestruct()
+        end
+    end)
+end
+
 -- // ULTIMATE CONFIGURATION \\ --
 local CONFIG = {
     Enabled = true,
@@ -22,7 +50,7 @@ local CONFIG = {
     
     -- ROUND SETTINGS
     RoundDuration = 15,
-    PanicThreshold = 4,   
+    PanicThreshold = 4,    
     SafeModeThreshold = 6, 
     
     -- SPEED SETTINGS
